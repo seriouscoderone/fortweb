@@ -1,5 +1,6 @@
 import { createRuntimeBridge } from "../runtime/bridge.js";
 import {
+    homeHref,
     identifiersHref,
     navigate,
     normalizeHash,
@@ -20,6 +21,8 @@ import {
 import { isFixtureRoute, loadFixture } from "../fixtures/fixture-router.js";
 import { renderFixtureIndexPage } from "../fixtures/fixture-index-page.js";
 import { offerFingerprint } from "../features/vaults/fingerprint-offer.js";
+import { renderStartingPage } from "../features/vaults/vault-picker-page.js";
+import { cachedDefaultVault, rememberDefaultVault } from "./launch-cache.js";
 import { closeAllModals } from "../ui/composites/modal.js";
 import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
@@ -155,6 +158,10 @@ let actions: AppActions;
 let vaultsLoaded = false;
 /** The once-per-launch jump to the default vault has happened. */
 let launchRouted = false;
+/** Default vault remembered from the previous launch (non-secret fields). */
+let launchCache = cachedDefaultVault();
+/** Vault whose unlock screen was shown from the launch cache before vaults loaded. */
+let earlyUnlockVaultId: string | null = null;
 let initialVaultError: RuntimeError | null = null;
 
 /**
@@ -191,7 +198,13 @@ function requireUnlockedVaultId(): string {
 }
 
 function findVault(vaultId?: string): VaultRecord | null {
-    return currentState().vaults.find((vault) => vault.id === vaultId) || null;
+    const found = currentState().vaults.find((vault) => vault.id === vaultId) || null;
+    if (!found && !vaultsLoaded && launchCache && launchCache.id === vaultId) {
+        // Before the runtime has listed vaults, the remembered default vault
+        // stands in so its unlock screen (and fingerprint prompt) can show.
+        return { ...launchCache, locked: true, isDefault: true };
+    }
+    return found;
 }
 
 function isUnlocked(vaultId: string): boolean {
@@ -337,6 +350,9 @@ actions = {
         const decorated = decorateVaults(vaults, unlockedVaultId, vaultSummary);
         session.patch({ vaults: decorated });
         drawer?.refresh(decorated);
+        const defaultVault = decorated.find((candidate) => candidate.isDefault) ?? null;
+        rememberDefaultVault(defaultVault);
+        launchCache = defaultVault;
         vaultsLoaded = true;
         initialVaultError = null;
         return decorated;
@@ -535,6 +551,20 @@ async function render(): Promise<void> {
     const state = currentState();
     const vault = route.requiresVault ? findVault(route.params.vaultId) : null;
 
+    if (route.name === "home" && !vaultsLoaded && !initialVaultError) {
+        if (!launchRouted && launchCache) {
+            launchRouted = true;
+            navigate(unlockHref(launchCache.id));
+            return;
+        }
+        renderShell(root, { route, page: renderStartingPage(), state, vault: null, actions });
+        return;
+    }
+
+    if (route.name === "unlock" && !vaultsLoaded && vault) {
+        earlyUnlockVaultId = vault.id;
+    }
+
     if (route.name === "home" && vaultsLoaded) {
         // Wallet-first launch: go straight to the default vault, once per launch,
         // so "back to vaults" from an unlock screen still reaches home.
@@ -677,6 +707,18 @@ async function bootstrap(): Promise<void> {
 
     try {
         await actions.refreshVaults();
+        const route = parseRoute();
+        if (earlyUnlockVaultId && route.name === "unlock" && route.params.vaultId === earlyUnlockVaultId) {
+            if (findVault(earlyUnlockVaultId)) {
+                // Already showing (and possibly prompting on) the right unlock
+                // screen; re-rendering would prompt for the fingerprint twice.
+                return;
+            }
+            // The remembered vault is gone: fall back to normal launch routing.
+            launchRouted = false;
+            navigate(homeHref());
+            return;
+        }
         await render();
     } catch (error) {
         postLog("initial_vault_refresh_failed", {

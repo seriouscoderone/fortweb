@@ -86,6 +86,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
                                 </button>
                             </div>
                             <p class="status-line" id="unlock-status" data-unlock-status role="status" aria-live="polite"></p>
+                            <div class="loading-bar" role="progressbar" aria-label="Opening vault" data-unlock-progress hidden></div>
                             <div class="lk-dialog__buttons unlock-dialog-card__buttons">
                                 <a class="button button--secondary" href="${homeHref()}">Cancel</a>
                                 <button class="button button--primary" type="submit">Open</button>
@@ -137,6 +138,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
             const openButton: HTMLButtonElement = submitButton;
             const passcodeField: HTMLInputElement = passcodeInput;
             const status: HTMLElement = statusLine;
+            const progress = root.querySelector("[data-unlock-progress]");
             const fingerprintButton = root.querySelector("[data-unlock-fingerprint]");
             const forgetButton = root.querySelector("[data-unlock-forget]");
             let fingerprint: FingerprintState = { available: false, stored: false };
@@ -146,7 +148,8 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
                 if (forgetButton instanceof HTMLButtonElement) forgetButton.hidden = !visible;
             }
 
-            function setBusy(message: string): void {
+            function setBusy(message: string, showProgress = true): void {
+                if (progress instanceof HTMLElement) progress.hidden = !showProgress;
                 openButton.disabled = true;
                 if (fingerprintButton instanceof HTMLButtonElement) fingerprintButton.disabled = true;
                 status.textContent = message;
@@ -155,6 +158,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
             }
 
             function setIdle(message = "", isError = false): void {
+                if (progress instanceof HTMLElement) progress.hidden = true;
                 openButton.disabled = false;
                 if (fingerprintButton instanceof HTMLButtonElement) fingerprintButton.disabled = false;
                 status.classList.remove("status-line--loading");
@@ -199,7 +203,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
             }
 
             async function unlockWithFingerprint(): Promise<void> {
-                setBusy("Waiting for fingerprint...");
+                setBusy("Waiting for fingerprint...", false);
                 let passcode: string;
                 try {
                     passcode = await recallPasscode(vault);
