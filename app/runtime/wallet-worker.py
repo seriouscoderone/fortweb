@@ -44,6 +44,7 @@ ALLOWED_METHODS = {
     "vaults.open",
     "vaults.close",
     "vaults.summary",
+    "vaults.setDefault",
     "identifiers.list",
     "identifiers.get",
     "identifiers.create",

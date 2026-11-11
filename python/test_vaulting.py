@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import importlib.util
 import unittest
 from pathlib import Path
@@ -247,6 +248,113 @@ class VaultSetupTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.keeper.opened)
         self.assertFalse(self.baser.opened)
         self.assertFalse(self.cf.opened)
+
+
+
+class _FakeStore:
+    def __init__(self):
+        self.items = {}
+
+
+class _FakeRegistryDb:
+    def __init__(self, store):
+        self.store = store
+        self.flushes = 0
+
+    def getVal(self, store, key):
+        return store.items.get(key)
+
+    def setVal(self, store, key, value):
+        store.items[key] = value
+
+    async def flush(self):
+        self.flushes += 1
+
+
+class DefaultVaultTest(unittest.TestCase):
+    """The registry marks exactly one vault as the user's default."""
+
+    def setUp(self):
+        self.vaulting = _load_module()
+        self.vaulting.configure_runtime(
+            ensure_runtime_packages=None,
+            load_modules=None,
+            clienter_factory=None,
+            storage_opener=None,
+            wallet_storage_prefix="fortweb-vault-",
+            registry_name="fortweb-vault-registry",
+            registry_store="vaults.",
+            legacy_root_salt="0AAwMTIzNDU2Nzg5YWJjZGVm",
+            passcode_kdf_defaults={"algorithm": "argon2id13", "salt": "NHCtv3Actrddf8jC", "opslimit": 2, "memlimit": 67_108_864, "outlen": 16},
+            default_settings={},
+            kf_state_subdb="kfst.",
+        )
+        store = _FakeStore()
+        self.registry = {"db": _FakeRegistryDb(store), "store": store}
+
+        async def ensure_registry():
+            return self.registry
+
+        async def build_vault_state(record, *, bran=""):
+            return {"hby": object(), "vault": record}
+
+        async def close_habery(_hby, *, clear=False):
+            return None
+
+        self.vaulting.ensure_registry = ensure_registry
+        self.vaulting._build_vault_state = build_vault_state
+        self.vaulting.close_habery = close_habery
+        self.vaulting._prepare_bran = lambda passcode, _kdf=None: "bran" if passcode else ""
+        self.vaulting._generate_root_salt = lambda: "0AAwMTIzNDU2Nzg5YWJjZGVm"
+        self.vaulting._STATE = None
+
+    def call(self, method, params=None):
+        return asyncio.run(self.vaulting.dispatch(method, params or {}))
+
+    def defaults(self):
+        return {vault["id"]: vault["isDefault"] for vault in self.call("vaults.list")["vaults"]}
+
+    def put_legacy_record(self, vault_id, created_at):
+        record = {"id": vault_id, "alias": vault_id, "createdAt": created_at, "encrypted": True}
+        self.registry["store"].items[vault_id.encode()] = json.dumps(record).encode()
+
+    def test_first_vault_becomes_default_and_later_ones_do_not(self):
+        first = self.call("vaults.create", {"name": "My Wallet", "passcode": "pw-1"})["vault"]
+        second = self.call("vaults.create", {"name": "Side", "passcode": "pw-2"})["vault"]
+
+        self.assertTrue(first["isDefault"])
+        self.assertFalse(second["isDefault"])
+        self.assertEqual(self.defaults(), {"my-wallet": True, "side": False})
+
+    def test_set_default_moves_the_single_default(self):
+        self.call("vaults.create", {"name": "My Wallet", "passcode": "pw-1"})
+        self.call("vaults.create", {"name": "Side", "passcode": "pw-2"})
+
+        result = self.call("vaults.setDefault", {"vaultId": "side"})
+
+        self.assertTrue(result["vault"]["isDefault"])
+        self.assertEqual(self.defaults(), {"my-wallet": False, "side": True})
+
+    def test_set_default_for_unknown_vault_is_not_found(self):
+        self.call("vaults.create", {"name": "My Wallet", "passcode": "pw-1"})
+
+        with self.assertRaises(self.vaulting.RuntimeFault) as caught:
+            self.call("vaults.setDefault", {"vaultId": "nope"})
+
+        self.assertEqual(caught.exception.code, "NOT_FOUND")
+        self.assertEqual(self.defaults(), {"my-wallet": True})
+
+    def test_existing_vaults_without_a_default_adopt_the_earliest(self):
+        self.put_legacy_record("later", "2026-06-01T00:00:00Z")
+        self.put_legacy_record("earliest", "2026-01-01T00:00:00Z")
+        self.put_legacy_record("middle", "2026-03-01T00:00:00Z")
+
+        self.assertEqual(self.defaults(), {"earliest": True, "later": False, "middle": False})
+        # The migration is persisted, not recomputed differently next time.
+        self.assertEqual(self.defaults(), {"earliest": True, "later": False, "middle": False})
+
+    def test_no_vaults_means_no_default(self):
+        self.assertEqual(self.call("vaults.list"), {"vaults": []})
 
 
 if __name__ == "__main__":

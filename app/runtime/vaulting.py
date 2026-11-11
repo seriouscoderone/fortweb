@@ -125,6 +125,7 @@ def _vault_record(
     root_salt: str,
     passcode_kdf: dict | None = None,
     created_at: str | None = None,
+    is_default: bool = False,
 ):
     return {
         "id": vault_id,
@@ -137,6 +138,7 @@ def _vault_record(
         "createdAt": created_at or now_iso(),
         "rootSalt": root_salt,
         "passcodeKdf": _normalize_passcode_kdf(passcode_kdf),
+        "isDefault": bool(is_default),
     }
 
 
@@ -154,6 +156,7 @@ def _registry_payload(record, existing=None):
             "createdAt": record["createdAt"],
             "rootSalt": record["rootSalt"],
             "passcodeKdf": record["passcodeKdf"],
+            "isDefault": record["isDefault"],
         }
     )
     return payload
@@ -172,6 +175,7 @@ def _coerce_vault_record(record):
         root_salt=root_salt,
         passcode_kdf=record.get("passcodeKdf"),
         created_at=created_at,
+        is_default=bool(record.get("isDefault", False)),
     )
     coerced["description"] = str(record.get("description") or coerced["description"])
     coerced["runtimeMode"] = str(record.get("runtimeMode") or coerced["runtimeMode"])
@@ -192,6 +196,7 @@ def _vault_view(record):
         "encrypted": record["encrypted"],
         "otpConfigured": record["otpConfigured"],
         "createdAt": record["createdAt"],
+        "isDefault": record["isDefault"],
         "opened": _STATE is not None and _STATE["vault"]["id"] == record["id"],
     }
 
@@ -243,6 +248,16 @@ def _registry_record_by_alias(registry, alias: str):
         if _sort_key(record["alias"]) == target:
             return record
     return None
+
+
+def _ensure_default_vault(registry, records):
+    """Exactly one vault is the user's default; existing installs adopt the earliest."""
+    if not records or any(record["isDefault"] for record in records):
+        return False
+    earliest = min(records, key=lambda item: (item["createdAt"], item["id"]))
+    earliest["isDefault"] = True
+    _set_registry_record(registry, earliest)
+    return True
 
 
 def _set_registry_record(registry, record):
@@ -795,7 +810,25 @@ def _vault_summary(state):
 async def dispatch(method: str, params: dict):
     if method == "vaults.list":
         registry = await ensure_registry()
-        return {"vaults": [_vault_view(record) for record in _registry_records(registry)]}
+        records = _registry_records(registry)
+        if _ensure_default_vault(registry, records):
+            await registry["db"].flush()
+        return {"vaults": [_vault_view(record) for record in records]}
+
+    if method == "vaults.setDefault":
+        registry = await ensure_registry()
+        vault_id = _require_vault_id(params)
+        records = _registry_records(registry)
+        target = next((record for record in records if record["id"] == vault_id), None)
+        if target is None:
+            raise RuntimeFault("NOT_FOUND", f"Vault '{vault_id}' was not found.")
+        for record in records:
+            is_default = record["id"] == vault_id
+            if record["isDefault"] != is_default:
+                record["isDefault"] = is_default
+                _set_registry_record(registry, record)
+        await registry["db"].flush()
+        return {"vault": _vault_view(target)}
 
     if method == "vaults.create":
         registry = await ensure_registry()
@@ -804,7 +837,9 @@ async def dispatch(method: str, params: dict):
         if _registry_record_by_alias(registry, alias) is not None:
             raise RuntimeFault("CONFLICT", f"Vault '{alias}' already exists.")
 
-        vault_id = _vault_id_for_alias(alias, {record["id"] for record in _registry_records(registry)})
+        existing = _registry_records(registry)
+        _ensure_default_vault(registry, existing)
+        vault_id = _vault_id_for_alias(alias, {record["id"] for record in existing})
         passcode = str(params.get("passcode") or "")
         encrypted = bool(passcode.strip())
         record = _vault_record(
@@ -813,6 +848,7 @@ async def dispatch(method: str, params: dict):
             encrypted=encrypted,
             root_salt=_generate_root_salt(),
             passcode_kdf=_normalize_passcode_kdf(),
+            is_default=not existing,
         )
         bran = _prepare_bran(passcode, record["passcodeKdf"]) if encrypted else ""
 

@@ -4,6 +4,7 @@ export const METHODS = Object.freeze({
     vaultsOpen: "vaults.open",
     vaultsClose: "vaults.close",
     vaultsSummary: "vaults.summary",
+    vaultsSetDefault: "vaults.setDefault",
     identifiersList: "identifiers.list",
     identifiersGet: "identifiers.get",
     identifiersCreate: "identifiers.create",
