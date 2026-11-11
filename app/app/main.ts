@@ -20,6 +20,7 @@ import {
 import { isFixtureRoute, loadFixture } from "../fixtures/fixture-router.js";
 import { renderFixtureIndexPage } from "../fixtures/fixture-index-page.js";
 import { offerFingerprint } from "../features/vaults/fingerprint-offer.js";
+import { closeAllModals } from "../ui/composites/modal.js";
 import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
 import { fingerprintState } from "../runtime/vault-fingerprint.js";
@@ -140,6 +141,8 @@ const bridge = createRuntimeBridge({
     workerUrl: runtimeOriginContract?.workerUrl ?? new URL("../runtime/wallet-worker.py", import.meta.url),
     configUrl: runtimeOriginContract?.configUrl ?? new URL("../../pyscript-ci.toml", import.meta.url),
     runtimeOriginContract,
+    onWorkerReset: (reason) => handleVaultClosedUnderneath(`runtime reset: ${reason}`),
+    onVaultLocked: () => handleVaultClosedUnderneath("request refused: vault locked"),
 });
 const session = createSessionStore({
     vaultSummary: null,
@@ -153,6 +156,27 @@ let vaultsLoaded = false;
 /** The once-per-launch jump to the default vault has happened. */
 let launchRouted = false;
 let initialVaultError: RuntimeError | null = null;
+
+/**
+ * The vault the UI thinks is open has closed underneath it (e.g. the runtime
+ * was discarded after the app sat in the background). Drop any dialogs acting
+ * on it and return to its unlock screen, which offers fingerprint unlock.
+ */
+function handleVaultClosedUnderneath(reason: string): void {
+    const vaultId = currentState().unlockedVaultId;
+    if (!vaultId) {
+        return;
+    }
+    postLog("vault_closed_underneath", { level: "warning", reason });
+    session.patch({
+        unlockedVaultId: null,
+        vaultSummary: null,
+        mobileNavOpen: false,
+    });
+    closeAllModals();
+    drawer?.close();
+    navigate(unlockHref(vaultId));
+}
 
 function currentState(): AppSessionState {
     return assumeType<AppSessionState>(session.snapshot());

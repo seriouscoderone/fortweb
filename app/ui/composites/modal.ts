@@ -24,6 +24,16 @@ export interface ModalController {
 /**
  * Create a modal dialog with focus management.
  */
+/** Close functions of currently open modals, newest last. */
+const openModals = new Set<() => void>();
+
+/** Closes every open modal, e.g. when the vault they act on has closed. */
+export function closeAllModals(): void {
+    for (const close of [...openModals].reverse()) {
+        close();
+    }
+}
+
 export function createModal(props: ModalProps): ModalController {
     const { title, body, tone = "default", actions = [], onClose } = props;
 
@@ -119,6 +129,7 @@ export function createModal(props: ModalProps): ModalController {
 
     function releaseBackground(): void {
         isOpen = false;
+        openModals.delete(close);
         cancelAnimationFrame(openingFrame);
         document.removeEventListener("keydown", onKeyDown, true);
         document.removeEventListener("focusin", onFocusIn, true);
@@ -160,6 +171,7 @@ export function createModal(props: ModalProps): ModalController {
         removalTimer = null;
         restoreFocus = captureFocusReturn();
         isOpen = true;
+        openModals.add(close);
         root.inert = false;
         document.body.appendChild(root);
         isolateBackground();

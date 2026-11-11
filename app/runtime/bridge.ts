@@ -53,6 +53,10 @@ interface RuntimeBridgeOptions {
     workerUrl: URL | string;
     configUrl: URL | string;
     runtimeOriginContract?: FortRuntimeOriginContractV1 | null;
+    /** The worker (and any vault open in it) was discarded. */
+    onWorkerReset?(reason: string): void;
+    /** A request was refused because its vault is not open. */
+    onVaultLocked?(): void;
 }
 
 interface RuntimeBridge {
@@ -166,7 +170,13 @@ function parseWorkerDiagnostic(rawPayload: unknown): WorkerDiagnostic | null {
     };
 }
 
-export function createRuntimeBridge({ workerUrl, configUrl, runtimeOriginContract = null }: RuntimeBridgeOptions): RuntimeBridge {
+export function createRuntimeBridge({
+    workerUrl,
+    configUrl,
+    runtimeOriginContract = null,
+    onWorkerReset,
+    onVaultLocked,
+}: RuntimeBridgeOptions): RuntimeBridge {
     let requestCounter = 0;
     let bootedWorker: PyWorkerHandle | null = null;
     let promisedWorker: PyWorkerHandle | null = null;
@@ -280,6 +290,9 @@ export function createRuntimeBridge({ workerUrl, configUrl, runtimeOriginContrac
             terminateWorker,
             () => {},
         );
+        if (!destroyed) {
+            onWorkerReset?.(reason);
+        }
     }
 
     function attachWorkerHandlers(worker: PyWorkerHandle): void {
@@ -479,6 +492,9 @@ export function createRuntimeBridge({ workerUrl, configUrl, runtimeOriginContrac
             return result;
         } catch (firstError) {
             const code = getErrorCode(firstError, "RUNTIME_ERROR");
+            if (code === "LOCKED") {
+                onVaultLocked?.();
+            }
             if (code === "TIMEOUT") {
                 postLog("request_timeout", {
                     level: "warning",

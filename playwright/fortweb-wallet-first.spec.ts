@@ -83,3 +83,42 @@ test('Make default in Settings changes which vault opens at launch', async ({ pa
     await page.reload();
     await expect(page).toHaveURL(/#\/vaults\/side\/unlock$/, { timeout: 240_000 });
 });
+
+test('a vault closed by a background runtime reset returns to its unlock screen', async ({ page }) => {
+    test.setTimeout(420_000);
+    await page.goto('/fortweb/app/index.html');
+    await waitForSetup(page);
+    await page.getByLabel('Passcode', { exact: true }).fill('reset-pass-1');
+    await page.getByLabel('Confirm passcode', { exact: true }).fill('reset-pass-1');
+    await page.getByRole('button', { name: 'Create wallet' }).click();
+    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+
+    // Leave a dialog open on a vault page, as in the field report.
+    await page.evaluate(() => { window.location.hash = '#/vaults/my-wallet/remotes'; });
+    await page.getByRole('button', { name: 'Add Remote Identifier', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add Remote Identifier', exact: true });
+    await expect(dialog).toBeVisible();
+
+    // Simulate the app being in the background for 31 s, then returning.
+    await page.evaluate(() => {
+        let hidden = false;
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+        hidden = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+        const realNow = Date.now.bind(Date);
+        Date.now = () => realNow() + 31_000;
+        hidden = false;
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await expect(page).toHaveURL(/#\/vaults\/my-wallet\/unlock$/);
+    await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('#app-root')).toHaveJSProperty('inert', false);
+
+    // The fresh runtime opens the vault again and returns to where the user was.
+    await page.getByLabel('Passcode').fill('reset-pass-1');
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Remote Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(page).toHaveURL(/#\/vaults\/my-wallet\/remotes$/);
+});
