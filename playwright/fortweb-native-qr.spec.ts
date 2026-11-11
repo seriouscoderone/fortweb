@@ -106,3 +106,28 @@ test('No Scan QR button outside the Android app', async ({ page }) => {
     await expect(dialog.getByRole('textbox', { name: 'OOBI URL' })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Scan QR code' })).toHaveCount(0);
 });
+
+test('Scan QR button is spaced from neighbours and long errors wrap', async ({ page }) => {
+    const longUrl = 'https://witness.example.com/oobi/' + 'E'.repeat(44) + '/witness/' + 'B'.repeat(44);
+    await installFakeAndroidBridge(page);
+    await page.addInitScript((message) => {
+        (window as unknown as Record<string, unknown>)['__qrResponse'] = {
+            ok: false,
+            error: { code: 'failed', message },
+        };
+    }, `could not read ${longUrl}`);
+    await page.setViewportSize({ width: 411, height: 845 });
+
+    const dialog = await openAddRemoteDialog(page);
+    const urlBox = await dialog.getByRole('textbox', { name: 'OOBI URL' }).boundingBox();
+    const scan = dialog.getByRole('button', { name: 'Scan QR code', exact: true });
+    const scanBox = await scan.boundingBox();
+    const aliasBox = await dialog.getByText('Alias', { exact: true }).boundingBox();
+    expect(scanBox!.y - (urlBox!.y + urlBox!.height)).toBeGreaterThanOrEqual(8);
+    expect(aliasBox!.y - (scanBox!.y + scanBox!.height)).toBeGreaterThanOrEqual(8);
+
+    await scan.click();
+    await expect(dialog.locator('[data-resolve-remote-status]')).toContainText('could not read');
+    const overflow = await dialog.locator('.lk-dialog__content').evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+});

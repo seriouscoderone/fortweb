@@ -66,7 +66,7 @@ function createResolveRemoteDialog(onResolveRemote: RemotesPageProps["onResolveR
         body: `
             <form data-resolve-remote-form>
                 ${fieldTextHtml({ id: "resolve-oobi-url", label: "OOBI URL", placeholder: "https://...", required: true })}
-                ${isNativeAvailable() ? `<button type="button" class="button button--secondary" data-scan-qr>Scan QR code</button>` : ""}
+                ${isNativeAvailable() ? `<button type="button" class="button button--secondary remote-scan-qr" data-scan-qr>Scan QR code</button>` : ""}
                 ${fieldTextHtml({ id: "resolve-alias", label: "Alias", placeholder: "e.g. remote-peer" })}
                 <p class="muted">Enter the OOBI URL shared by the identifier's controller or provider.</p>
                 <p class="status-line" data-resolve-remote-status></p>

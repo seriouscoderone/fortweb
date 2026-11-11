@@ -1029,6 +1029,13 @@
     color: var(--color-danger);
     font-size: 13px;
     min-height: 1.25rem;
+    /* Long URLs and AIDs in messages wrap instead of widening the dialog. */
+    overflow-wrap: anywhere;
+}
+
+.remote-scan-qr {
+    align-self: flex-start;
+    margin: 8px 0 12px;
 }
 
 .status-line.is-neutral {
