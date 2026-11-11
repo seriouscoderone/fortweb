@@ -8,6 +8,7 @@ import {
     recallPasscode,
     type FingerprintState,
 } from "../../runtime/vault-fingerprint.js";
+import { syncPasswordToggle } from "../../shared/components.js";
 import { formatDateLabel } from "../../shared/dom.js";
 import { announce } from "../../ui/core/a11y.js";
 
@@ -80,8 +81,8 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
                                     autocomplete="off"
                                     aria-describedby="unlock-status"
                                 >
-                                <button type="button" class="unlock-passcode-field__toggle" data-unlock-toggle aria-label="Toggle password visibility">
-                                    <img src="./assets/icons/browse.svg" alt="" width="22" height="22">
+                                <button type="button" class="unlock-passcode-field__toggle" data-unlock-toggle aria-label="Toggle password visibility" aria-pressed="false">
+                                    <img src="./assets/icons/visibility.svg" alt="" width="22" height="22">
                                 </button>
                             </div>
                             <p class="status-line" id="unlock-status" data-unlock-status role="status" aria-live="polite"></p>
@@ -129,6 +130,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
             if (toggleButton instanceof HTMLElement) {
                 toggleButton.addEventListener("click", () => {
                     passcodeInput.type = passcodeInput.type === "password" ? "text" : "password";
+                    syncPasswordToggle(toggleButton, passcodeInput);
                 });
             }
 
