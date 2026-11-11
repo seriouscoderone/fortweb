@@ -4,6 +4,7 @@ import { escapeHtml } from "../../shared/dom.js";
 import { createModal } from "../../ui/composites/modal.js";
 import { showToast } from "../../ui/composites/toast.js";
 import { fieldTextHtml } from "../../ui/primitives/field-text.js";
+import { isNativeAvailable, NativeCallError, scanQrCode } from "../../runtime/native-capabilities.js";
 import { chipHtml } from "../../ui/primitives/chip.js";
 
 interface VaultRecord {
@@ -65,6 +66,7 @@ function createResolveRemoteDialog(onResolveRemote: RemotesPageProps["onResolveR
         body: `
             <form data-resolve-remote-form>
                 ${fieldTextHtml({ id: "resolve-oobi-url", label: "OOBI URL", placeholder: "https://...", required: true })}
+                ${isNativeAvailable() ? `<button type="button" class="button button--secondary" data-scan-qr>Scan QR code</button>` : ""}
                 ${fieldTextHtml({ id: "resolve-alias", label: "Alias", placeholder: "e.g. remote-peer" })}
                 <p class="muted">Enter the OOBI URL shared by the identifier's controller or provider.</p>
                 <p class="status-line" data-resolve-remote-status></p>
@@ -93,6 +95,11 @@ function createResolveRemoteDialog(onResolveRemote: RemotesPageProps["onResolveR
     }
 
     cancelBtn?.addEventListener("click", () => modal.close());
+
+    const scanBtn = queryButton(root, "[data-scan-qr]");
+    scanBtn?.addEventListener("click", () => {
+        void scanIntoOobiField(form, statusLine, scanBtn);
+    });
 
     async function submit(): Promise<void> {
         const oobiUrl = queryInput(form, "#resolve-oobi-url")?.value.trim() || "";
@@ -123,6 +130,35 @@ function createResolveRemoteDialog(onResolveRemote: RemotesPageProps["onResolveR
         event.preventDefault();
         void submit();
     });
+}
+
+async function scanIntoOobiField(
+    form: HTMLFormElement,
+    statusLine: HTMLElement,
+    scanBtn: HTMLButtonElement,
+): Promise<void> {
+    const field = queryInput(form, "#resolve-oobi-url");
+    if (!field) {
+        return;
+    }
+
+    scanBtn.disabled = true;
+    statusLine.textContent = "";
+
+    try {
+        const scan = await scanQrCode("Scan an OOBI QR code");
+        field.value = scan.text;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        if (!scan.isOobi) {
+            statusLine.textContent = "This doesn't look like an OOBI link.";
+        }
+    } catch (error) {
+        if (!(error instanceof NativeCallError && error.code === "cancelled")) {
+            statusLine.textContent = `QR scan failed: ${errorMessage(error, "unknown error")}`;
+        }
+    } finally {
+        scanBtn.disabled = false;
+    }
 }
 
 function createRemoteEditDialog(
