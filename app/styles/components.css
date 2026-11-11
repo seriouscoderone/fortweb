@@ -653,6 +653,10 @@
     padding: 20px;
 }
 
+.unlock-dialog-card [hidden] {
+    display: none;
+}
+
 .unlock-passcode-field {
     position: relative;
 }

@@ -73,6 +73,17 @@ const FIXTURES: Record<string, FixtureFactory> = {
         route: { name: "unlock", shellMode: "home", navMode: "none", path: "/_fixtures/unlock", params: { vaultId: FIXTURE_VAULT_ID_CONST } },
     }),
 
+    "unlock/auth-fails": () => ({
+        page: renderUnlockPage({
+            vault: fixtureVaultLocked,
+            onOpenVault: async () => {
+                throw Object.assign(new Error("Passcode incorrect for this vault."), { code: "AUTH_FAILED" });
+            },
+        }),
+        vault: null,
+        route: { name: "unlock", shellMode: "home", navMode: "none", path: "/_fixtures/unlock/auth-fails", params: { vaultId: FIXTURE_VAULT_ID_CONST } },
+    }),
+
     "identifiers/empty": () => ({
         page: renderIdentifiersPage({ vault: fixtureVault, identifiers: [], onCreateIdentifier: asyncNoop }),
         vault: fixtureVault,
