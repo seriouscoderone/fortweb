@@ -1,16 +1,13 @@
 import { homeHref } from "../../app/router.js";
 import { NativeCallError } from "../../runtime/native-capabilities.js";
+import { offerFingerprint } from "./fingerprint-offer.js";
 import {
-    declineFingerprint,
     fingerprintState,
     forgetPasscode,
     hasDeclinedFingerprint,
     recallPasscode,
-    rememberPasscode,
     type FingerprintState,
 } from "../../runtime/vault-fingerprint.js";
-import { createModal } from "../../ui/composites/modal.js";
-import { showToast } from "../../ui/composites/toast.js";
 import { formatDateLabel } from "../../shared/dom.js";
 import { announce } from "../../ui/core/a11y.js";
 
@@ -37,48 +34,6 @@ const INVALIDATED_MESSAGE =
     "A new fingerprint or face was added to this phone, so fingerprint unlock was turned off. Enter your passcode.";
 const STALE_PASSCODE_MESSAGE =
     "Your saved passcode no longer opens this vault, so fingerprint unlock was turned off. Enter your passcode.";
-
-/** After a successful passcode unlock, offer to save the passcode for fingerprint unlock. */
-function offerFingerprint(vault: VaultRecord, passcode: string): void {
-    const modal = createModal({
-        title: "Use fingerprint unlock?",
-        body: `
-            <p>Open <strong data-offer-vault></strong> with your fingerprint or face next time.</p>
-            <p class="muted">Your passcode is encrypted by this phone's secure hardware and released only after a
-            fingerprint or face match. You can turn this off from the unlock screen.</p>
-        `,
-        actions: [
-            { label: "Not now", tone: "ghost", dataAction: "decline" },
-            { label: "Use fingerprint", tone: "primary", dataAction: "accept" },
-        ],
-    });
-    modal.open();
-
-    const root = document.querySelector("[role='dialog'][aria-label='Use fingerprint unlock?']");
-    if (!(root instanceof HTMLElement)) {
-        return;
-    }
-    const vaultName = root.querySelector("[data-offer-vault]");
-    if (vaultName) {
-        vaultName.textContent = vault.alias;
-    }
-
-    root.querySelector("[data-action='decline']")?.addEventListener("click", () => {
-        void declineFingerprint(vault);
-        modal.close();
-    });
-    root.querySelector("[data-action='accept']")?.addEventListener("click", async () => {
-        modal.close();
-        try {
-            await rememberPasscode(vault, passcode);
-            showToast({ message: `Fingerprint unlock is on for ${vault.alias}.`, tone: "success" });
-        } catch (error) {
-            if (errorCode(error) !== "cancelled") {
-                showToast({ message: "Fingerprint unlock was not turned on.", tone: "error" });
-            }
-        }
-    });
-}
 
 function errorMessage(error: unknown): string {
     if (
