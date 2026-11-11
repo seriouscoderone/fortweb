@@ -19,7 +19,10 @@ import {
 } from "../shared/components.js";
 import { isFixtureRoute, loadFixture } from "../fixtures/fixture-router.js";
 import { renderFixtureIndexPage } from "../fixtures/fixture-index-page.js";
+import { offerFingerprint } from "../features/vaults/fingerprint-offer.js";
+import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
+import { fingerprintState } from "../runtime/vault-fingerprint.js";
 import { METHODS } from "../runtime/method-catalog.js";
 import { postLog } from "../runtime/logger.js";
 import {
@@ -42,6 +45,7 @@ interface VaultRecord {
     identifierCount?: number;
     remoteCount?: number;
     locked?: boolean;
+    isDefault?: boolean;
 }
 
 type VaultSummary = {
@@ -58,6 +62,7 @@ interface AppSessionState extends SessionState {
 
 type AppActions = LoadPageActions & ShellProps["actions"] & {
     createVault(name: string, passcode?: string): Promise<VaultRecord>;
+    setUpWallet(name: string, passcode: string): Promise<void>;
     refreshVaults(unlockedVaultId?: string | null, vaultSummary?: VaultSummary): Promise<VaultRecord[]>;
     toggleNav(): void;
     closeNav(): void;
@@ -145,6 +150,8 @@ const session = createSessionStore({
 let drawer: ReturnType<typeof createVaultDrawer> | null = null;
 let actions: AppActions;
 let vaultsLoaded = false;
+/** The once-per-launch jump to the default vault has happened. */
+let launchRouted = false;
 let initialVaultError: RuntimeError | null = null;
 
 function currentState(): AppSessionState {
@@ -342,6 +349,16 @@ actions = {
         return vault;
     },
 
+    async setUpWallet(name: string, passcode: string): Promise<void> {
+        const { vault } = await bridge.request<{ vault: VaultRecord }>(METHODS.vaultsCreate, { name, passcode });
+        await actions.refreshVaults(null, null);
+        await actions.openVault(vault.id, passcode);
+        const fingerprint = await fingerprintState(vault);
+        if (fingerprint.available && !fingerprint.stored) {
+            offerFingerprint(vault, passcode);
+        }
+    },
+
     async lockVault(vaultId: string): Promise<void> {
         if (isUnlocked(vaultId)) {
             await bridge.request(METHODS.vaultsClose, { vaultId }).catch(() => {});
@@ -488,6 +505,31 @@ async function render(): Promise<void> {
     const route = parseRoute();
     const state = currentState();
     const vault = route.requiresVault ? findVault(route.params.vaultId) : null;
+
+    if (route.name === "home" && vaultsLoaded) {
+        // Wallet-first launch: go straight to the default vault, once per launch,
+        // so "back to vaults" from an unlock screen still reaches home.
+        if (!launchRouted) {
+            launchRouted = true;
+            const defaultVault = state.vaults.find((candidate) => candidate.isDefault);
+            if (defaultVault) {
+                navigate(isUnlocked(defaultVault.id)
+                    ? state.lastCoreRoutes[defaultVault.id] || identifiersHref(defaultVault.id)
+                    : unlockHref(defaultVault.id));
+                return;
+            }
+        }
+        if (state.vaults.length === 0 && !initialVaultError) {
+            renderShell(root, {
+                route,
+                page: renderSetupPage({ onCreateWallet: (name, passcode) => actions.setUpWallet(name, passcode) }),
+                state,
+                vault: null,
+                actions,
+            });
+            return;
+        }
+    }
 
     if (route.name !== "home" && route.requiresVault && !vault) {
         if (!vaultsLoaded) {
