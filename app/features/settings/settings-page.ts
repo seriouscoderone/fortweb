@@ -7,6 +7,7 @@ import { fieldTextHtml } from "../../ui/primitives/field-text.js";
 interface VaultRecord {
     id: string;
     alias: string;
+    isDefault?: boolean;
 }
 
 interface SettingsRecord {
@@ -22,6 +23,8 @@ interface SettingsPageProps {
     vault: VaultRecord;
     settings: SettingsRecord;
     onDeleteVault?(vaultId: string): Promise<void>;
+    /** Makes this the vault that opens when the app starts. */
+    onMakeDefault?(vaultId: string): Promise<void>;
 }
 
 function enabledLabel(value: boolean): string {
@@ -120,7 +123,57 @@ function openDeleteConfirmation(
     });
 }
 
-export function renderSettingsPage({ vault, settings, onDeleteVault }: SettingsPageProps) {
+function startupCard(vault: VaultRecord, onMakeDefault: SettingsPageProps["onMakeDefault"]): HTMLElement {
+    const card = document.createElement("section");
+    card.className = "section-card settings-panel";
+
+    const title = document.createElement("h2");
+    title.textContent = "Startup";
+
+    const copy = document.createElement("p");
+    copy.className = "muted";
+    copy.setAttribute("role", "status");
+
+    const actions = document.createElement("div");
+    actions.className = "panel__actions";
+
+    function showDefault(): void {
+        copy.textContent = `${vault.alias} opens when the app starts.`;
+        actions.replaceChildren();
+    }
+
+    if (vault.isDefault) {
+        showDefault();
+    } else {
+        copy.textContent = "Another vault opens when the app starts. Make this one the default to open it instead.";
+        const button = document.createElement("button");
+        button.className = "button button--secondary";
+        button.type = "button";
+        button.textContent = "Make default";
+        if (typeof onMakeDefault === "function") {
+            button.addEventListener("click", async () => {
+                button.disabled = true;
+                try {
+                    await onMakeDefault(vault.id);
+                    vault.isDefault = true;
+                    showDefault();
+                    announce(`${vault.alias} is now the default.`);
+                } catch (error) {
+                    button.disabled = false;
+                    copy.textContent = errorMessage(error, "Could not change the default vault.");
+                }
+            });
+        } else {
+            button.disabled = true;
+        }
+        actions.append(button);
+    }
+
+    card.append(title, copy, actions);
+    return card;
+}
+
+export function renderSettingsPage({ vault, settings, onDeleteVault, onMakeDefault }: SettingsPageProps) {
     return {
         title: "Settings",
         render(container: HTMLElement): void {
@@ -183,7 +236,7 @@ export function renderSettingsPage({ vault, settings, onDeleteVault }: SettingsP
             );
 
             runtimeCard.append(runtimeTitle, runtimeGrid);
-            columns.append(defaultsCard, runtimeCard);
+            columns.append(startupCard(vault, onMakeDefault), defaultsCard, runtimeCard);
 
             const dangerZone = document.createElement("section");
             dangerZone.className = "section-card danger-zone settings-panel settings-panel--danger";

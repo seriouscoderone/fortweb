@@ -32,6 +32,7 @@ interface VaultDrawerRecord {
     locked?: boolean;
     identifierCount?: number;
     remoteCount?: number;
+    isDefault?: boolean;
 }
 
 interface VaultDrawerOptions<Vault extends VaultDrawerRecord> {
@@ -281,6 +282,13 @@ export function createVaultDrawer<Vault extends VaultDrawerRecord>(opts: VaultDr
                     status.className = "lk-drawer__item-status";
                     status.textContent = "Current";
                     heading.append(status);
+                }
+
+                if (vault.isDefault) {
+                    const badge = document.createElement("span");
+                    badge.className = "lk-drawer__item-status lk-drawer__item-default";
+                    badge.textContent = "Default";
+                    heading.append(badge);
                 }
 
                 const meta = document.createElement("span");

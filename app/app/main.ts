@@ -359,6 +359,11 @@ actions = {
         }
     },
 
+    async setDefaultVault(vaultId: string): Promise<void> {
+        await bridge.request(METHODS.vaultsSetDefault, { vaultId });
+        await actions.refreshVaults();
+    },
+
     async lockVault(vaultId: string): Promise<void> {
         if (isUnlocked(vaultId)) {
             await bridge.request(METHODS.vaultsClose, { vaultId }).catch(() => {});

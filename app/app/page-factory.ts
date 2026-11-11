@@ -31,6 +31,7 @@ interface VaultRecord {
     identifierCount?: number;
     remoteCount?: number;
     locked?: boolean;
+    isDefault?: boolean;
 }
 
 interface RuntimeBridgeLike {
@@ -54,6 +55,7 @@ interface PageActions {
     refreshKfWatcherStatuses(watcherEids?: string[]): Promise<void>;
     resolveRemoteOobi(url: string, alias: string): Promise<void>;
     setRemoteFilter(filter: string): void;
+    setDefaultVault(vaultId: string): Promise<void>;
     startKfOnboarding(request: {
         bootUrl: string;
         alias: string;
@@ -171,6 +173,7 @@ export async function loadPage({
             page: renderSettingsPage({
                 vault: assumeType<SettingsPageProps["vault"]>(findVault(route.params.vaultId)),
                 settings: assumeType<SettingsPageProps["settings"]>(pageData.settings),
+                onMakeDefault: (vaultId: string) => actions.setDefaultVault(vaultId),
             }),
             vault: findVault(route.params.vaultId),
         };
