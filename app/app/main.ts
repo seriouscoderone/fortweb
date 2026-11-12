@@ -29,6 +29,7 @@ import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
 import { fingerprintState } from "../runtime/vault-fingerprint.js";
 import { METHODS } from "../runtime/method-catalog.js";
+import type { SourceView } from "../features/roles/roles-page.js";
 import { postLog } from "../runtime/logger.js";
 import {
     describeRuntimeOriginContract,
@@ -426,6 +427,10 @@ actions = {
         session.patch({ vaultSummary: vault });
         await actions.refreshVaults(vaultId, vault);
         await render();
+    },
+
+    async readSource(address: string): Promise<SourceView> {
+        return bridge.request<SourceView & Record<string, unknown>>(METHODS.sourcesRead, { address });
     },
 
     async resolveRemoteOobi(url: string, alias: string): Promise<void> {

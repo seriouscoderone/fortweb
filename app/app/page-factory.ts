@@ -5,6 +5,7 @@ import { renderIdentifierDetailPage } from "../features/identifiers/identifier-d
 import { renderIdentifiersPage } from "../features/identifiers/identifiers-page.js";
 import { renderRemoteDetailPage } from "../features/remotes/remote-detail-page.js";
 import { renderRemotesPage } from "../features/remotes/remotes-page.js";
+import { renderRolesPage, type SourceView } from "../features/roles/roles-page.js";
 import { renderSettingsPage } from "../features/settings/settings-page.js";
 import { renderUnlockPage } from "../features/vaults/unlock-page.js";
 import { renderVaultPickerPage } from "../features/vaults/vault-picker-page.js";
@@ -17,6 +18,7 @@ type UnlockPageProps = Parameters<typeof renderUnlockPage>[0];
 type IdentifiersPageProps = Parameters<typeof renderIdentifiersPage>[0];
 type IdentifierDetailProps = Parameters<typeof renderIdentifierDetailPage>[0];
 type RemotesPageProps = Parameters<typeof renderRemotesPage>[0];
+type RolesPageProps = Parameters<typeof renderRolesPage>[0];
 type RemoteDetailProps = Parameters<typeof renderRemoteDetailPage>[0];
 type SettingsPageProps = Parameters<typeof renderSettingsPage>[0];
 type KfIdentifiersPageProps = Parameters<typeof renderKfIdentifiersPage>[0];
@@ -52,6 +54,7 @@ interface PageActions {
     createIdentifier(alias: string): Promise<void>;
     loadKfBootstrap(bootUrl?: string): Promise<WitnessOverviewProps["bootstrapState"]>;
     openVault(vaultId: string, passcode?: string): Promise<RecordValue>;
+    readSource(address: string): Promise<SourceView>;
     refreshKfWatcherStatuses(watcherEids?: string[]): Promise<void>;
     resolveRemoteOobi(url: string, alias: string): Promise<void>;
     setRemoteFilter(filter: string): void;
@@ -114,6 +117,19 @@ export async function loadPage({
     }
 
     const pageData = await loadRouteData({ route, bridge });
+
+    if (route.name === "roles") {
+        const vaultId = route.params.vaultId ?? "";
+        return {
+            page: renderRolesPage({
+                vault: assumeType<RolesPageProps["vault"]>(findVault(vaultId)),
+                roles: [],
+                identifiers: pageData.identifiers || [],
+                onReadSource: actions.readSource,
+            }),
+            vault: findVault(vaultId),
+        };
+    }
 
     if (route.name === "identifiers") {
         const vaultId = route.params.vaultId ?? "";

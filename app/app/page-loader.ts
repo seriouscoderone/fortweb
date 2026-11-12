@@ -30,6 +30,12 @@ export interface RouteDataResult {
 }
 
 export async function loadRouteData({ bridge, route }: RouteDataLoaderContext): Promise<RouteDataResult> {
+    if (route.name === "roles") {
+        // Taken-on roles (roles.list) join this page with taking on a role; until then the list is empty.
+        const vaultId = route.params.vaultId ?? "";
+        return bridge.request<{ identifiers: RecordValue[] }>(METHODS.identifiersList, { vaultId });
+    }
+
     if (route.name === "identifiers") {
         const vaultId = route.params.vaultId ?? "";
         return bridge.request<{ identifiers: RecordValue[] }>(METHODS.identifiersList, { vaultId });
