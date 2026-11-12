@@ -246,15 +246,20 @@ function focusShown(selector: string): void {
     }
 }
 
+/** Tells each take-on dialog's form apart from a previous one that may still be fading out. */
+let takeOnDialogs = 0;
+
 function openTakeOnDialog(
     request: Omit<TakeOnRequest, "identifier">,
     identifiers: VaultIdentifier[],
     onTakeOn: NonNullable<RolesPageProps["onTakeOn"]>,
 ): void {
+    takeOnDialogs += 1;
+    const dialogNumber = String(takeOnDialogs);
     const modal = createModal({
         title: `Take on ${request.role}`,
         body: `
-            <form class="roles-take-on" data-take-on-form novalidate>
+            <form class="roles-take-on" data-take-on-form="${dialogNumber}" novalidate>
                 <fieldset class="roles-take-on__choices">
                     <legend class="roles-take-on__legend">Identifier</legend>
                     <label class="kf-radio-card roles-take-on__choice is-selected">
@@ -283,7 +288,8 @@ function openTakeOnDialog(
     });
     modal.open();
 
-    const formNode = document.querySelector("[data-take-on-form]");
+    // A dialog closed a moment ago stays in the document while it fades out: find this call's own form.
+    const formNode = document.querySelector(`[data-take-on-form="${dialogNumber}"]`);
     const root = formNode?.closest("[role='dialog']");
     if (!(formNode instanceof HTMLFormElement) || !(root instanceof HTMLElement)) {
         throw new Error("Take on dialog is missing its form.");

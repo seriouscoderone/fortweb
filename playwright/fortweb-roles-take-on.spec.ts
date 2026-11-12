@@ -210,6 +210,24 @@ test.describe('Taking on a role', () => {
         await expect(dialog.dialog).toBeVisible();
     });
 
+    test('a dialog opened just after another closed is the one its controls belong to', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await startTakingOn(page, 'cashier');
+        // Cancel and open the next dialog at once, while the first is still fading out.
+        await page.evaluate(() => {
+            (document.querySelector('[role="dialog"] [data-action="cancel"]') as HTMLButtonElement).click();
+            (document.querySelector('button[aria-label="Take on instructor"]') as HTMLButtonElement).click();
+        });
+        const dialog = takeOnDialog(page, 'instructor');
+        await expect(dialog.dialog).toBeVisible();
+        await expect(dialog.name).toHaveValue('instructor');
+        await dialog.takeOn.click();
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        await expect(myRoles(page).item('instructor')).toHaveCount(1);
+    });
+
     test('both dialog buttons are disabled while the wallet works', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);
