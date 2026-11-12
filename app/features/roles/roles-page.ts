@@ -167,7 +167,8 @@ function roleItem(
     heading.id = headingId;
     const takeOn = element("button", "Take on", "button button--secondary button--small");
     takeOn.type = "button";
-    takeOn.setAttribute("aria-describedby", headingId);
+    // Every button shows "Take on"; its name says which role. setAttribute keeps the role name text.
+    takeOn.setAttribute("aria-label", `Take on ${role.role}`);
     if (typeof onTakeOn === "function") {
         takeOn.addEventListener("click", () => {
             void onTakeOn(publication, role.role);

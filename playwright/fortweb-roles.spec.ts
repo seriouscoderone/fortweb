@@ -363,9 +363,13 @@ test.describe('Roles page', () => {
             'class-attended: relies on enrollment (as seat), attended (as visit); attests class-attended; '
             + 'produces class-attended',
         ]);
-        // Taking on a role comes with the next change; until then the button is there but does nothing.
-        await expect(list.getByRole('button', { name: 'Take on', exact: true })).toHaveCount(5);
-        for (const button of await list.getByRole('button', { name: 'Take on', exact: true }).all()) {
+        // Taking on a role comes with the next change; until then the button is there but does nothing. Each button
+        // is named after its role and shows "Take on".
+        const buttons = list.getByRole('button', { name: /^Take on / });
+        await expect(buttons).toHaveCount(5);
+        for (const role of ['cashier', 'front-desk', 'instructor', 'patron', 'recorder']) {
+            const button = list.getByRole('button', { name: `Take on ${role}`, exact: true });
+            await expect(button).toHaveText('Take on');
             await expect(button).toBeDisabled();
         }
     });
