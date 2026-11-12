@@ -221,6 +221,25 @@ def response(status=200, content_type="application/json", chunks=(b"{}",), body=
                                  reader=reader)
 
 
+def answering(make):
+    """An `answer` for StubJs that serves `make()` to every fetch."""
+    async def answer(url, options):
+        return make()
+    return answer
+
+
+async def unreachable(url, options):
+    """An `answer` for StubJs: every fetch is rejected, the probe too."""
+    raise RuntimeError("TypeError: Failed to fetch")
+
+
+async def not_allowed(url, options):
+    """An `answer` for StubJs: the read is rejected and the probe is answered."""
+    if options.mode == "cors":
+        raise RuntimeError("TypeError: Failed to fetch")
+    return types.SimpleNamespace(status=0, type="opaque")
+
+
 class StubJs:
     """fetch, AbortController, setTimeout/clearTimeout and performance.now, as roling uses them.
 
@@ -388,23 +407,10 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                          ("UNREACHABLE", "Could not reach mad.example.test.", 1_234))
 
     async def test_faults_before_any_body_byte_carry_no_received_bytes(self):
-        def answering(served):
-            async def answer(url, options):
-                return served
-            return answer
-
-        async def unreachable(url, options):
-            raise RuntimeError("TypeError: Failed to fetch")
-
-        async def not_allowed(url, options):
-            if options.mode == "cors":
-                raise RuntimeError("TypeError: Failed to fetch")
-            return types.SimpleNamespace(status=0, type="opaque")
-
         cases = {
-            "status": (answering(response(status=404, chunks=(b"x" * 500,))), "BAD_SOURCE"),
-            "content type": (answering(response(content_type="text/html", chunks=(b"x" * 500,))), "BAD_SOURCE"),
-            "missing body": (answering(response(body=False)), "BAD_SOURCE"),
+            "status": (answering(lambda: response(status=404, chunks=(b"x" * 500,))), "BAD_SOURCE"),
+            "content type": (answering(lambda: response(content_type="text/html", chunks=(b"x" * 500,))), "BAD_SOURCE"),
+            "missing body": (answering(lambda: response(body=False)), "BAD_SOURCE"),
             "unreachable": (unreachable, "UNREACHABLE"),
             "not readable": (not_allowed, "NOT_READABLE"),
         }
@@ -509,20 +515,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                 # What the person is told stays the same.
                 self.assertEqual((fault.code, fault.message), ("UNREACHABLE", "Could not reach mad.example.test."))
 
-    async def test_expected_faults_and_a_good_read_are_not_reported(self):
-        def answering(make):
-            async def answer(url, options):
-                return make()
-            return answer
-
-        async def unreachable(url, options):
-            raise RuntimeError("TypeError: Failed to fetch")
-
-        async def not_allowed(url, options):
-            if options.mode == "cors":
-                raise RuntimeError("TypeError: Failed to fetch")
-            return types.SimpleNamespace(status=0, type="opaque")
-
+    async def test_expected_faults_are_not_reported(self):
         def dropped():
             raise RuntimeError("TypeError: network error")
 
@@ -540,6 +533,8 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                 self.stub(answer)
                 self.assertEqual((await self.fault()).code, code)
                 self.assertEqual(emitted, [])
+
+    async def test_good_read_is_not_reported(self):
         emitted = self.diagnostics()
         self.stub(answering(response))
         self.assertEqual(await self.roling._fetch_bytes(URL, 10_000), b"{}")
