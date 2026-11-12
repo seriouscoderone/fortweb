@@ -91,5 +91,12 @@ test.describe('The last read', () => {
             await expect(roles.address).toHaveValue(FIXTURE_HOST);
             await expect(roles.cards).toHaveCount(3, { timeout: 90_000 });
             await expect(roles.status).toHaveText('');
+            // Had the read still been running on coming back, this page would now announce its result (one frame
+            // after showing it): a wait above that is too short fails here instead of passing.
+            await page.evaluate(() => new Promise((resolve) => {
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+            }));
+            expect(await page.evaluate(() => (window as unknown as { announced: string[] }).announced
+                .filter((text) => text !== ''))).toEqual([]);
         });
 });
