@@ -42,7 +42,7 @@ test.describe('The take-on dialog', () => {
         await takeOnWithNewIdentifier(page, 'cashier');
         const dialog = await startTakingOn(page, 'instructor');
         await expect(dialog.createNew).toBeFocused();
-        // With the other choice selected it is that one which gets focus next time.
+        // Whatever was selected in a dialog before, a new one opens with the first choice selected and focused.
         await dialog.selectExisting.check();
         await dialog.cancel.click();
         await expect(dialog.dialog).toHaveCount(0);
