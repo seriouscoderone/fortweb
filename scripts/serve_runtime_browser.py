@@ -50,6 +50,8 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 "./app/runtime/vaulting.py" = "./vaulting.py"
 "./app/runtime/transporting.py" = "./transporting.py"
 "./app/runtime/onboarding.py" = "./onboarding.py"
+"./app/runtime/sourcing.py" = "./sourcing.py"
+"./app/runtime/roling.py" = "./roling.py"
 '''
 
 

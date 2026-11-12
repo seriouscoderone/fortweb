@@ -18,4 +18,8 @@ export const METHODS = Object.freeze({
     kfAccountWitnessesList: "kf.account.witnesses.list",
     kfAccountWatchersList: "kf.account.watchers.list",
     kfAccountWatchersStatus: "kf.account.watchers.status",
+    sourcesRead: "sources.read",
+    rolesList: "roles.list",
+    rolesTakeOn: "roles.takeOn",
+    rolesRemove: "roles.remove",
 } as const);

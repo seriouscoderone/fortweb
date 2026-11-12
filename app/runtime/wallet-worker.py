@@ -12,6 +12,7 @@ from uuid import uuid4
 import js
 
 import onboarding
+import roling
 import runtime_packages
 import transporting
 import vaulting
@@ -58,6 +59,10 @@ ALLOWED_METHODS = {
     "kf.account.witnesses.list",
     "kf.account.watchers.list",
     "kf.account.watchers.status",
+    "sources.read",
+    "roles.list",
+    "roles.takeOn",
+    "roles.remove",
 }
 DEFAULT_KF_BOOT_URL = "http://127.0.0.1:9723"
 KF_STATE_KEY = "state"
@@ -366,6 +371,8 @@ onboarding.configure_runtime(
 async def _dispatch(method: str, params: dict):
     if method.startswith("kf."):
         return await onboarding.dispatch(method, params)
+    if method.startswith(("sources.", "roles.")):
+        return await roling.dispatch(method, params)
     return await vaulting.dispatch(method, params)
 
 

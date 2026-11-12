@@ -22,6 +22,8 @@ const METHOD_TIMEOUT_MS: Record<string, number> = {
     "identifiers.create": 90_000,
     "remotes.resolveOobi": 60_000,
     "kf.onboarding.start": 120_000,
+    // A source read may take up to 60 s; a bridge TIMEOUT would restart the worker.
+    "sources.read": 75_000,
 };
 
 type RuntimeBridgeError = Error & { code?: string; cause?: unknown };
