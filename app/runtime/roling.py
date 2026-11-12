@@ -3,6 +3,7 @@
 The read rules live in sourcing.py, which opens nothing. This module gives them the network (`js.fetch` with the
 options below), the Blake3 digest of the bundled wheel and the clock, and turns a SourceFault into the RuntimeFault
 the worker reports. Reading a source touches no vault. Nothing fetched is executed, rendered or made a link here.
+The worker gives this module its diagnostic emitter (configure_runtime).
 """
 
 from __future__ import annotations
@@ -28,6 +29,24 @@ FAULT_CODES = {
 # A no-cors probe only tells "cannot be reached" from "does not allow the read"; it gets this fixed budget,
 # whatever the request's own timeout.
 PROBE_MS = 3_000
+
+_CONFIG: dict = {}
+
+
+def configure_runtime(*, emit_diagnostic):
+    """`emit_diagnostic(event, *, level, **fields)` is the worker's diagnostic emitter."""
+    _CONFIG.clear()
+    _CONFIG.update(emit_diagnostic=emit_diagnostic)
+
+
+def _diagnose(event: str, **fields) -> None:
+    """Report through the worker's diagnostics. A report that cannot be made is dropped: reporting never changes
+    what a request does."""
+    try:
+        _CONFIG["emit_diagnostic"](event, **fields)
+    except Exception:
+        pass
+
 
 # The full result of the newest sources.read, definitions included (taking on a role reads it). Reads run
 # concurrently: each takes a number when it starts, and its result is kept only if no newer read has started since,
@@ -100,7 +119,8 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
 
     The fault's `received` is the number of body bytes read before it (0 when it came before the body), so the
     read's byte budget counts them. Any unexpected error (a JsException, a malformed response) is UNREACHABLE; its
-    text is never shown.
+    text is never shown. So that a programming error or a changed browser API does not pass for an unreachable
+    host, it is reported as a warning diagnostic that names only the error's class and the host.
     """
     host = sourcing.source_host(url)
     count = _BodyCount()
@@ -109,7 +129,8 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
     except sourcing.SourceFault as fault:
         fault.received = count.received
         raise
-    except Exception:
+    except Exception as error:
+        _diagnose("source_fetch_unexpected_error", level="warning", exception=type(error).__name__, host=host)
         raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.", received=count.received) from None
 
 

@@ -246,6 +246,12 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
             await self.roling._fetch_bytes(URL, timeout_ms)
         return raised.exception
 
+    def diagnostics(self) -> list:
+        """Gives roling a diagnostic emitter, as the worker does; returns the (event, fields) it is called with."""
+        emitted = []
+        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: emitted.append((event, fields)))
+        return emitted
+
     async def test_read_uses_the_fixed_fetch_options_and_clears_its_timer(self):
         served = response(chunks=(b'{"a":', b"1}"))
 
@@ -454,6 +460,79 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                 self.stub(answer)
                 fault = await self.fault()
                 self.assertEqual((fault.code, fault.message), ("UNREACHABLE", "Could not reach mad.example.test."))
+
+    async def test_unexpected_error_is_reported_as_a_warning_naming_only_its_class_and_the_host(self):
+        def broken_headers(name):
+            raise RuntimeError("JsException: secret internal detail")
+
+        cases = {
+            "before the body": ("RuntimeError", lambda: types.SimpleNamespace(
+                status=200, headers=types.SimpleNamespace(get=broken_headers), body=None)),
+            "midway through the body": ("ValueError", lambda: response(
+                chunks=(b'{"private":"content of the response"', ValueError("JsException: secret internal detail")))),
+        }
+        for name, (exception, make) in cases.items():
+            with self.subTest(case=name):
+                emitted = self.diagnostics()
+
+                async def answer(url, options):
+                    return make()
+                self.stub(answer)
+                fault = await self.fault()
+                # Exactly these fields: neither the error's text nor anything the source sent.
+                self.assertEqual(emitted, [("source_fetch_unexpected_error",
+                                            {"level": "warning", "exception": exception, "host": "mad.example.test"})])
+                # What the person is told stays the same.
+                self.assertEqual((fault.code, fault.message), ("UNREACHABLE", "Could not reach mad.example.test."))
+
+    async def test_expected_faults_and_a_good_read_are_not_reported(self):
+        def answering(make):
+            async def answer(url, options):
+                return make()
+            return answer
+
+        async def unreachable(url, options):
+            raise RuntimeError("TypeError: Failed to fetch")
+
+        async def not_allowed(url, options):
+            if options.mode == "cors":
+                raise RuntimeError("TypeError: Failed to fetch")
+            return types.SimpleNamespace(status=0, type="opaque")
+
+        def dropped():
+            raise RuntimeError("TypeError: network error")
+
+        cases = {
+            "status": (answering(lambda: response(status=404)), "BAD_SOURCE"),
+            "content type": (answering(lambda: response(content_type="text/html")), "BAD_SOURCE"),
+            "too much": (answering(lambda: response(chunks=(b"x" * 1_000_001,))), "TOO_MUCH"),
+            "unreachable": (unreachable, "UNREACHABLE"),
+            "not readable": (not_allowed, "NOT_READABLE"),
+            "body stops midway": (answering(lambda: response(chunks=(b"x" * 10, dropped))), "UNREACHABLE"),
+        }
+        for name, (answer, code) in cases.items():
+            with self.subTest(case=name):
+                emitted = self.diagnostics()
+                self.stub(answer)
+                self.assertEqual((await self.fault()).code, code)
+                self.assertEqual(emitted, [])
+        emitted = self.diagnostics()
+        self.stub(answering(response))
+        self.assertEqual(await self.roling._fetch_bytes(URL, 10_000), b"{}")
+        self.assertEqual(emitted, [])
+
+    async def test_report_that_cannot_be_made_does_not_change_the_fault(self):
+        def emit(event, **fields):
+            raise RuntimeError("the page is not listening")
+        self.roling.configure_runtime(emit_diagnostic=emit)
+        served = response(chunks=(b"x" * 1_234, RuntimeError("JsException: secret internal detail")))
+
+        async def answer(url, options):
+            return served
+        self.stub(answer)
+        fault = await self.fault()
+        self.assertEqual((fault.code, fault.message, fault.received),
+                         ("UNREACHABLE", "Could not reach mad.example.test.", 1_234))
 
     async def test_unexpected_error_in_one_definition_is_a_mismatch_not_a_failed_read(self):
         files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
