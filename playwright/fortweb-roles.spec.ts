@@ -138,6 +138,18 @@ test.describe('sources.read', () => {
         }]);
     });
 
+    test('reads the fixture source before any wallet is set up', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await openStartPage(page);
+        const outcome = await readSource(page, FIXTURE_HOST);
+        expect(outcome.ok && outcome.result.publications.map((p) => [p.name, p.problem])).toEqual([
+            ['class-brick', null], ['dropin-class', null], ['member-class', null],
+        ]);
+        expect(outcome.ok && outcome.result.checked).toBe(26);
+        // Still no wallet: the start page is what the person sees.
+        await expect(page.getByRole('heading', { name: 'Set up your wallet' })).toBeVisible();
+    });
+
     test('a source that does not allow the wallet\'s origin may not be read yet', async ({ context, page }) => {
         await routeFixtureSource(context, { cors: false });
         await setUpWallet(page);
