@@ -584,6 +584,37 @@ test.describe('Roles page', () => {
         await expect(roles.card('class-brick').getByText(/Unverified/)).toHaveCount(0);
     });
 
+    test('one introduction, one catalog and one ignored entry use the singular', async ({ context, page }) => {
+        await routeFixtureSource(context, { edit: editSource((document) => {
+            document.introductions = [{}];
+            document.catalogs = [{}];
+            document.serves.push({ said: 'not-a-said', refers: [] });
+        }) });
+        await setUpWallet(page);
+        const roles = rolesPage(page);
+        await openAddress(page, FIXTURE_HOST);
+        await expect(roles.cards).toHaveCount(3, { timeout: 90_000 });
+        const source = roles.main.locator('[data-roles-source]');
+        await expect(source.getByText(
+            'It introduces 1 other source and lists 1 catalog. The wallet does not follow them yet.',
+            { exact: true })).toBeVisible();
+        await expect(source.getByText('1 entry was ignored.', { exact: true })).toBeVisible();
+    });
+
+    test('several introductions use the plural', async ({ context, page }) => {
+        await routeFixtureSource(context, { edit: editSource((document) => {
+            document.introductions = [{}, {}];
+            document.catalogs = [];
+        }) });
+        await setUpWallet(page);
+        const roles = rolesPage(page);
+        await openAddress(page, FIXTURE_HOST);
+        await expect(roles.cards).toHaveCount(3, { timeout: 90_000 });
+        await expect(roles.main.locator('[data-roles-source]').getByText(
+            'It introduces 2 other sources and lists 0 catalogs. The wallet does not follow them yet.',
+            { exact: true })).toBeVisible();
+    });
+
     test('a read lives only on the page: coming back shows the empty address box', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);
