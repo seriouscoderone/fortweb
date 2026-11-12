@@ -110,6 +110,8 @@ interface RolesPageProps {
     vault: VaultRecord;
     /** The roles this vault has taken on (`roles.list`), newest first. */
     roles: TakenRole[];
+    /** `roles.list` failed: My roles says it could not be read. */
+    rolesUnreadable?: boolean;
     identifiers: VaultIdentifier[];
     onReadSource(address: string): Promise<SourceView>;
     /** The kept last read, if any. */
@@ -553,7 +555,7 @@ function takenRoleItem(role: TakenRole, onRemove: RolesPageProps["onRemove"], st
     return item;
 }
 
-function myRolesCard(roles: TakenRole[], onRemove: RolesPageProps["onRemove"]): HTMLElement {
+function myRolesCard(roles: TakenRole[], unreadable: boolean, onRemove: RolesPageProps["onRemove"]): HTMLElement {
     const card = element("section", "", "section-card roles-mine");
     const heading = element("h2", "My roles");
     heading.id = "roles-mine-heading";
@@ -561,7 +563,9 @@ function myRolesCard(roles: TakenRole[], onRemove: RolesPageProps["onRemove"]): 
     card.setAttribute("aria-labelledby", heading.id);
     card.append(heading);
     const status = element("p", "", "status-line");
-    if (roles.length === 0) {
+    if (unreadable) {
+        card.append(element("p", "My roles could not be read."));
+    } else if (roles.length === 0) {
         card.append(element("p", "No roles yet. Open an address to see what you can take on.", "muted"));
     } else {
         const list = element("ul", "", "roles-mine__list");
@@ -577,6 +581,7 @@ function myRolesCard(roles: TakenRole[], onRemove: RolesPageProps["onRemove"]): 
 export function renderRolesPage({
     vault,
     roles,
+    rolesUnreadable = false,
     identifiers,
     onReadSource,
     lastRead,
@@ -612,7 +617,7 @@ export function renderRolesPage({
             const result = element("div", "", "roles-result");
             result.dataset.rolesResult = "true";
 
-            page.append(header, openCard, result, myRolesCard(roles, onRemove));
+            page.append(header, openCard, result, myRolesCard(roles, rolesUnreadable, onRemove));
             container.append(page);
         },
         setup(root: HTMLElement): void {

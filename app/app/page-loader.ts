@@ -1,5 +1,6 @@
 import { type Route } from "./router.js";
 import { METHODS } from "../runtime/method-catalog.js";
+import { postLog } from "../runtime/logger.js";
 
 type RecordValue = Record<string, unknown>;
 
@@ -23,6 +24,8 @@ export interface RouteDataResult {
     remote?: RecordValue;
     remotes?: RecordValue[];
     roles?: RecordValue[];
+    /** roles.list failed, not because the vault closed: the page says My roles could not be read. */
+    rolesUnreadable?: boolean;
     settings?: RecordValue;
     watcherError?: string;
     watchers?: RecordValue[];
@@ -36,8 +39,18 @@ export async function loadRouteData({ bridge, route }: RouteDataLoaderContext): 
         const { identifiers } = await bridge.request<{ identifiers: RecordValue[] }>(METHODS.identifiersList, {
             vaultId,
         });
-        const { roles } = await bridge.request<{ roles: RecordValue[] }>(METHODS.rolesList, { vaultId });
-        return { identifiers, roles };
+        try {
+            const { roles } = await bridge.request<{ roles: RecordValue[] }>(METHODS.rolesList, { vaultId });
+            return { identifiers, roles };
+        } catch (error) {
+            const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+            // The codes render() takes for a vault that closed underneath keep that handling.
+            if (code === "LOCKED" || code === "TIMEOUT") {
+                throw error;
+            }
+            postLog("roles_list_failed", { level: "warning", code });
+            return { identifiers, roles: [], rolesUnreadable: true };
+        }
     }
 
     if (route.name === "identifiers") {

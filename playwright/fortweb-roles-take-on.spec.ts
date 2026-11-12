@@ -242,4 +242,45 @@ test.describe('Taking on a role', () => {
         await showDropinRoles(page);
         await takeOnWithNewIdentifier(page, 'cashier');
     });
+
+    test('a roles store the wallet cannot read still shows the Roles page', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        // After a reload no runtime has the vault open: replace the stored role record (frol.) with bytes that are
+        // not JSON, so the store cannot rebuild it and roles.list fails.
+        await page.reload();
+        await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 240_000 });
+        const replaced = await page.evaluate(async () => {
+            const done = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+            const database = await done(indexedDB.open('IDBMap/@fortweb/fortweb-vault-my-wallet:frol.'));
+            const [storeName] = Array.from(database.objectStoreNames);
+            const store = () => database.transaction(storeName, 'readwrite').objectStore(storeName);
+            const records = await done(store().get('__records__'));
+            if (typeof records !== 'string') throw new Error(`unexpected records: ${typeof records}`);
+            // WebDBer keeps a sub-database as JSON: hex key -> hex value.
+            const notJson = Array.from(new TextEncoder().encode('{not json'))
+                .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+            const parsed = JSON.parse(records) as Record<string, string>;
+            for (const key of Object.keys(parsed)) parsed[key] = notJson;
+            await done(store().put(JSON.stringify(parsed), '__records__'));
+            database.close();
+            return Object.keys(parsed).length;
+        });
+        expect(replaced).toBe(1);
+        await page.getByLabel('Passcode').fill('roles-pass-1');
+        await page.getByRole('button', { name: 'Open', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
+        const roles = rolesPage(page);
+        await expect(roles.address).toBeEditable();
+        await expect(myRoles(page).region.getByText('My roles could not be read.', { exact: true })).toBeVisible();
+        await expect(myRoles(page).items).toHaveCount(0);
+        // The address box still works.
+        await showDropinRoles(page);
+        await expect(roles.cards).toHaveCount(3);
+    });
 });

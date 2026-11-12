@@ -134,6 +134,7 @@ export async function loadPage({
             page: renderRolesPage({
                 vault: assumeType<RolesPageProps["vault"]>(findVault(vaultId)),
                 roles: assumeType<RolesPageProps["roles"]>(pageData.roles || []),
+                rolesUnreadable: pageData.rolesUnreadable === true,
                 identifiers: assumeType<RolesPageProps["identifiers"]>(pageData.identifiers || []),
                 onReadSource: actions.readSource,
                 lastRead: actions.lastRead,
