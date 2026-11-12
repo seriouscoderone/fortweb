@@ -2563,7 +2563,14 @@
     }
 }
 
-/* Indeterminate loading bar: wallet start-up and vault opening. */
+/*
+ * Indeterminate loading bar: wallet start-up and vault opening.
+ *
+ * The marker moves between four positions on a timer (ui/primitives/loading-bar.ts).
+ * Keep it free of animations and transitions: a running animation draws a frame
+ * on every screen refresh, which slows the runtime boot on devices that render
+ * in software.
+ */
 .loading-bar {
     position: relative;
     overflow: hidden;
@@ -2582,18 +2589,16 @@
     width: 40%;
     border-radius: inherit;
     background: #61783e;
-    animation: loading-bar-slide 1.2s ease-in-out infinite;
 }
 
-@keyframes loading-bar-slide {
-    from { transform: translateX(-100%); }
-    to { transform: translateX(250%); }
-}
+.loading-bar[data-step="1"]::before { transform: translateX(50%); }
+.loading-bar[data-step="2"]::before { transform: translateX(100%); }
+.loading-bar[data-step="3"]::before { transform: translateX(150%); }
 
 @media (prefers-reduced-motion: reduce) {
     .loading-bar::before {
         width: 100%;
-        animation: none;
+        transform: none;
         opacity: 0.6;
     }
 }

@@ -24,6 +24,7 @@ import { offerFingerprint } from "../features/vaults/fingerprint-offer.js";
 import { renderStartingPage } from "../features/vaults/vault-picker-page.js";
 import { cachedDefaultVault, rememberDefaultVault } from "./launch-cache.js";
 import { closeAllModals } from "../ui/composites/modal.js";
+import { runLoadingBars } from "../ui/primitives/loading-bar.js";
 import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
 import { fingerprintState } from "../runtime/vault-fingerprint.js";
@@ -558,6 +559,7 @@ async function render(): Promise<void> {
             return;
         }
         renderShell(root, { route, page: renderStartingPage(), state, vault: null, actions });
+        runLoadingBars();
         return;
     }
 

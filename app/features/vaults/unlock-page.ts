@@ -11,6 +11,7 @@ import {
 import { syncPasswordToggle } from "../../shared/components.js";
 import { formatDateLabel } from "../../shared/dom.js";
 import { announce } from "../../ui/core/a11y.js";
+import { runLoadingBars } from "../../ui/primitives/loading-bar.js";
 
 interface VaultRecord {
     id: string;
@@ -150,6 +151,7 @@ export function renderUnlockPage({ vault, onOpenVault }: UnlockPageProps) {
 
             function setBusy(message: string, showProgress = true): void {
                 if (progress instanceof HTMLElement) progress.hidden = !showProgress;
+                if (showProgress) runLoadingBars();
                 openButton.disabled = true;
                 if (fingerprintButton instanceof HTMLButtonElement) fingerprintButton.disabled = true;
                 status.textContent = message;
