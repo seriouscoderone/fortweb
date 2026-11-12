@@ -1,0 +1,1 @@
+{"d":"EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-","kind":"authorization","alias":"enrollment","about":"EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx","schema":{"type":"object","properties":{"seat":{"type":"string"},"validFor":{"type":"string","format":"date-time"}}}}

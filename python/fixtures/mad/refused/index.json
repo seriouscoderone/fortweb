@@ -1,0 +1,12 @@
+[
+  {
+    "file": "content-holds-44-hashes.json",
+    "said": "ENC4tN0obd2DtTLvpO-7JOstvfmsZV2E4blCSxTynlMR",
+    "why": "its content holds 44 consecutive # beside the SAID slot"
+  },
+  {
+    "file": "content-holds-50-hashes.json",
+    "said": "EBeqbPt0PqxyA-ETTU2vbarzwEmq2tcpwTvugELdUpzz",
+    "why": "its content holds 50 consecutive # beside the SAID slot"
+  }
+]

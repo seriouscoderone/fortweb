@@ -1,0 +1,1 @@
+{"d":"ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V","kind":"aggregate","alias":"visit","schema":{"type":"object","properties":{"startedAt":{"type":"string","format":"date-time"},"endedAt":{"type":"string","format":"date-time"}}}}

@@ -1,0 +1,1 @@
+{"d":"EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69","kind":"fact","alias":"attended","about":"ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V","schema":{"type":"object","properties":{"occurredAt":{"type":"string","format":"date-time"},"place":{"$ref":"ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn"}}}}

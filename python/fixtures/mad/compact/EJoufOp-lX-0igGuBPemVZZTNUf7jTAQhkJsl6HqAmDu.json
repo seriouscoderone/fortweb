@@ -1,0 +1,1 @@
+{"d":"EJoufOp-lX-0igGuBPemVZZTNUf7jTAQhkJsl6HqAmDu","kind":"rr","alias":"remittance-submitted","role":"patron","outcome":{"kind":"fact","said":"EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3"},"track":"ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7","attest":["EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3"],"rules":[{"cel":"size(in_effect.outcome) == 0"}]}

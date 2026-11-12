@@ -1,0 +1,1 @@
+{"d":"EChOzca_pq3PtA9cwCie3xiMFx8u1JSO239LZSHY8xdd","kind":"aggregate","alias":"venue","schema":{"allOf":[{"$ref":"ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn"},{"type":"object","properties":{"amenities":{"type":"array","items":{"type":"string"}}}}]}}

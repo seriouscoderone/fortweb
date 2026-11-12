@@ -1,0 +1,1 @@
+{"d":"EG0KhmEywRn19YdO6GHKdrt-d1YPt-7glm7ovH_5i43S","kind":"aggregate","alias":"membership","schema":{"type":"object","properties":{"periodStart":{"type":"string"},"periodEnd":{"type":"string"}}}}

@@ -1,0 +1,1 @@
+{"d":"EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx","kind":"aggregate","alias":"class-session","schema":{"type":"object","properties":{"name":{"type":"string"},"startsAt":{"type":"string","format":"date-time"},"endsAt":{"type":"string","format":"date-time"},"capacity":{"type":"integer","minimum":0},"place":{"$ref":"ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn"}}}}

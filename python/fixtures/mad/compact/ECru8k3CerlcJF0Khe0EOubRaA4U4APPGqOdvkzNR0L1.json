@@ -1,0 +1,1 @@
+{"d":"ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1","kind":"aggregate","alias":"payment","schema":{"type":"object","properties":{"amount":{"type":"number"}}}}

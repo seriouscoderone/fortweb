@@ -1,0 +1,1 @@
+{"d":"ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7","kind":"aggregate","alias":"remittance","schema":{"type":"object","properties":{"amount":{"type":"number"}}}}

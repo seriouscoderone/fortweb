@@ -1,0 +1,1 @@
+{"d":"EF56Ri4rLV0XIxs3S7kUqo0pnUl6PQ8Y65PHydnIDvvQ","kind":"aggregate","alias":"roll","schema":{"type":"object","properties":{"takenAt":{"type":"string","format":"date-time"},"present":{"type":"integer","minimum":0}}}}

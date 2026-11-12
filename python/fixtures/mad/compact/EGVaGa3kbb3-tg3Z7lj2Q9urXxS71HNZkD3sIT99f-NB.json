@@ -1,0 +1,1 @@
+{"d":"EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB","kind":"authorization","alias":"admission","about":"ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V","schema":{"type":"object","properties":{"validFrom":{"type":"string","format":"date-time"},"validUntil":{"type":"string","format":"date-time"},"place":{"$ref":"ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn"}}}}
