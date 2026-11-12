@@ -173,6 +173,23 @@ test.describe('sources.read', () => {
         });
     });
 
+    for (const [answer, code, message] of [
+        ['missing', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
+        ['html', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
+        // The read refuses redirects. A redirect answered by route.fulfill cannot be followed by any fetch in Chromium
+        // (checked: cors and no-cors, same-host and other-host targets, the target is never requested), so the
+        // no-cors probe fails as well and the host counts as unreachable. A real server's redirect is followed by the
+        // probe and gives "does not allow wallets to read it yet" (a known, accepted limitation).
+        ['redirect', 'NETWORK_ERROR', 'Could not reach mad.example.test.'],
+    ] as const) {
+        test(`a source that answers ${answer === 'missing' ? '404' : answer === 'html' ? '200 text/html' : '302'}`,
+            async ({ context, page }) => {
+                await routeFixtureSource(context, { sourceAnswer: answer });
+                await openStartPage(page);
+                expect(await readSource(page, FIXTURE_HOST)).toEqual({ ok: false, code, message });
+            });
+    }
+
     test('a host that cannot be reached', async ({ context, page }) => {
         await context.route('https://down.example.test/**', (route) => route.abort('connectionrefused'));
         await setUpWallet(page);

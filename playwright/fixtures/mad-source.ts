@@ -20,6 +20,8 @@ export interface FixtureSourceOptions {
     tamper?: string;
     /** Serve a source document of 1,000,001 bytes. */
     oversize?: boolean;
+    /** Answer source.json with 404, with a 200 text/html page, or with a 302 to another address on the host. */
+    sourceAnswer?: 'missing' | 'html' | 'redirect';
     /** Hold the answer to source.json: `arrived` is called when its request comes in, the answer waits for `release`. */
     holdSource?: { arrived(): void; release: Promise<void> };
 }
@@ -79,7 +81,16 @@ export async function routeFixtureSource(context: BrowserContext, options: Fixtu
                 options.holdSource.arrived();
                 await options.holdSource.release;
             }
-            await route.fulfill({ status: 200, headers, body: document });
+            if (options.sourceAnswer === 'missing') {
+                await route.fulfill({ status: 404, headers, body: '' });
+            } else if (options.sourceAnswer === 'html') {
+                await route.fulfill({ status: 200, headers: { ...headers, 'content-type': 'text/html' },
+                    body: '<!doctype html><title>x</title>' });
+            } else if (options.sourceAnswer === 'redirect') {
+                await route.fulfill({ status: 302, headers: { ...headers, location: '/moved/source.json' }, body: '' });
+            } else {
+                await route.fulfill({ status: 200, headers, body: document });
+            }
             return;
         }
         const said = DEFINITION_PATH.exec(pathname)?.[1];
