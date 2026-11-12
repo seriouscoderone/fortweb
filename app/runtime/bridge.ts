@@ -24,6 +24,8 @@ const METHOD_TIMEOUT_MS: Record<string, number> = {
     "kf.onboarding.start": 120_000,
     // A source read may take up to 60 s; a bridge TIMEOUT would restart the worker.
     "sources.read": 75_000,
+    // Makes an identifier, as identifiers.create does; a bridge TIMEOUT would restart the worker mid-write.
+    "roles.takeOn": 90_000,
 };
 
 type RuntimeBridgeError = Error & { code?: string; cause?: unknown };
