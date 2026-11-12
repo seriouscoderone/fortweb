@@ -7,6 +7,7 @@ python/test_sourcing.py runs mad-discovery's own fixtures against this module.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -37,7 +38,7 @@ class SourceFault(Exception):
 
 
 def is_said(text) -> bool:
-    return isinstance(text, str) and SAID_PATTERN.match(text) is not None
+    return isinstance(text, str) and SAID_PATTERN.fullmatch(text) is not None
 
 
 def encode_said(digest: bytes) -> str:
@@ -64,15 +65,10 @@ def _bad():
     return SourceFault("BAD_ADDRESS", "That is not an address the wallet can open.")
 
 
-def normalize_address(text: str) -> dict:
-    """A host, a host with a path, or a full address -> the canonical https address ending /source.json."""
-    raw = str(text or "").strip()
-    if not raw or any(ch.isspace() for ch in raw) or len(raw) > MAX_ADDRESS:
+def _https_parts(raw: str) -> tuple[str, str]:
+    """The host and path of a plain https address, under the address rules; raises BAD_ADDRESS."""
+    if any(ch.isspace() for ch in raw) or len(raw) > MAX_ADDRESS:
         raise _bad()
-    if "://" not in raw:
-        if raw.startswith("/") or ":" in raw.split("/", 1)[0]:
-            raise _bad()
-        raw = "https://" + raw
     parts = urlsplit(raw)
     if parts.scheme != "https" or parts.query or parts.fragment or "?" in raw or "#" in raw:
         raise _bad()
@@ -96,6 +92,19 @@ def normalize_address(text: str) -> dict:
     path = parts.path or "/"
     if not _PATH.match(path) or "//" in path or any(seg in (".", "..") for seg in path.split("/")):
         raise _bad()
+    return host, path
+
+
+def normalize_address(text: str) -> dict:
+    """A host, a host with a path, or a full address -> the canonical https address ending /source.json."""
+    raw = str(text or "").strip()
+    if not raw:
+        raise _bad()
+    if "://" not in raw:
+        if raw.startswith("/") or ":" in raw.split("/", 1)[0]:
+            raise _bad()
+        raw = "https://" + raw
+    host, path = _https_parts(raw)
     if not path.endswith(_ENDING):
         path = path.rstrip("/") + _ENDING
     address = f"https://{host}{path}"
@@ -104,9 +113,149 @@ def normalize_address(text: str) -> dict:
     return {"address": address, "base": address[: -len("source.json")], "host": host}
 
 
+def _https_address(text: str) -> str | None:
+    """A plain https address as given (an oobi), canonical, without the /source.json ending; None if it breaks a rule."""
+    try:
+        host, path = _https_parts(text)
+    except SourceFault:
+        return None
+    address = f"https://{host}{path}"
+    return address if len(address) <= MAX_ADDRESS else None
+
+
 def definition_address(base: str, said: str) -> str:
     if not is_said(said):
         raise ValueError(f"not a SAID: {said}")
     if not base.endswith("/"):
         raise ValueError("a base ends with /")
     return f"{base}definitions/{said}.json"
+
+
+# A source document (mad-discovery src/document.ts, src/source.ts, src/scan.ts parseBounded).
+
+AID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
+CONTROL = re.compile(r"[\u0000-\u001f\u007f-\u009f]")
+PUBLICATION_NAME = 200
+PUBLICATION_DESCRIPTION = 2000
+PUBLICATION_TAGS = 32
+PUBLICATION_TAG = 64
+PUBLICATION_COLLECTION = 200
+_JSON_STRING = re.compile(rb'"(?:[^"\\]|\\.)*"?', re.DOTALL)
+_BRACKET = re.compile(rb"[\[\]{}]")
+
+
+def _depth(raw: bytes) -> int:
+    """Bracket nesting outside strings, counted on the bytes before anything is parsed."""
+    depth = deepest = 0
+    for mark in _BRACKET.findall(_JSON_STRING.sub(b"", raw)):
+        if mark in b"[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        else:
+            depth -= 1
+    return deepest
+
+
+def _no_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def _parse_bounded(raw: bytes):
+    """JSON.parse's reading of the bytes, refused before it starts when nested deeper than JSON_DEPTH."""
+    if _depth(raw) > JSON_DEPTH:
+        raise ValueError("nested too deep")
+    return json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+
+
+def _units(text: str) -> int:
+    """A string's length as JavaScript counts it, in UTF-16 code units."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _text(value, limit: int) -> bool:
+    return isinstance(value, str) and _units(value) <= limit and CONTROL.search(value) is None
+
+
+def _publication(item) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    if not is_said(item.get("target")):
+        return None
+    for name, limit in (("name", PUBLICATION_NAME), ("description", PUBLICATION_DESCRIPTION),
+                        ("collection", PUBLICATION_COLLECTION)):
+        if not _text(item.get(name), limit):
+            return None
+    tags = item.get("tags")
+    if not isinstance(tags, list) or len(tags) > PUBLICATION_TAGS:
+        return None
+    if not all(_text(tag, PUBLICATION_TAG) for tag in tags):
+        return None
+    if "by" in item and not (isinstance(item["by"], str) and AID_PATTERN.fullmatch(item["by"])):
+        return None
+    return {"target": item["target"], "name": item["name"], "description": item["description"],
+            "tags": list(tags), "collection": item["collection"]}
+
+
+def read_source_document(raw: bytes, address: str) -> dict:
+    """A fetched source document, read under mad-discovery's rules.
+
+    The whole document is refused when it is not bounded JSON, its top level is not an object, `source` is not
+    `address`, or a known member has the wrong type. A bad serves entry, refers item, `by` or `oobi` is dropped and
+    counted in dropped.entries; a bad publication in dropped.publications. Unknown members are ignored.
+    """
+    fault = SourceFault("BAD_SOURCE", f"{urlsplit(address).hostname or address} did not return a valid source.")
+    try:
+        r = _parse_bounded(raw)
+    except ValueError:
+        raise fault from None
+    if not isinstance(r, dict) or not isinstance(r.get("source"), str) or r["source"] != address:
+        raise fault
+    kinds = {"by": str, "oobi": str, "pages": bool, "serves": list, "publications": list,
+             "introductions": list, "catalogs": list}
+    if any(name in r and not isinstance(r[name], kind) for name, kind in kinds.items()):
+        raise fault
+    dropped = {"entries": 0, "publications": 0}
+
+    serves: dict[str, list[str]] = {}
+    for item in r.get("serves", []):
+        said = item.get("said") if isinstance(item, dict) else None
+        refers_raw = item.get("refers", []) if isinstance(item, dict) else None
+        if not is_said(said) or said in serves or not isinstance(refers_raw, list):
+            dropped["entries"] += 1
+            continue
+        refers: set[str] = set()
+        for ref in refers_raw:
+            if is_said(ref) and ref != said and ref not in refers:
+                refers.add(ref)
+            else:
+                dropped["entries"] += 1
+        serves[said] = sorted(refers)
+
+    publications = []
+    for item in r.get("publications", []):
+        publication = _publication(item)  # reads only its known members; the rest is ignored
+        if publication is None:
+            dropped["publications"] += 1
+        else:
+            publications.append(publication)
+
+    by = r.get("by")
+    if by is not None and not AID_PATTERN.fullmatch(by):
+        by = None
+        dropped["entries"] += 1
+    oobi = r.get("oobi")
+    if oobi is not None:
+        oobi = _https_address(oobi)
+        if oobi is None:
+            dropped["entries"] += 1
+
+    document = {
+        "source": address,
+        "by": by,
+        "oobi": oobi,
+        "serves": dict(sorted(serves.items())),
+        "publications": publications,
+        "introductions": len(r.get("introductions", [])),
+        "catalogs": len(r.get("catalogs", [])),
+    }
+    return {"document": document, "dropped": dropped}
