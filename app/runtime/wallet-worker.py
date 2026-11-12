@@ -67,6 +67,8 @@ ALLOWED_METHODS = {
 DEFAULT_KF_BOOT_URL = "http://127.0.0.1:9723"
 KF_STATE_KEY = "state"
 KF_STATE_SUBDB = "kfst."
+ROLES_SUBDB = "frol."
+ROLE_DEFINITIONS_SUBDB = "fdef."
 KF_PROXY_PREFIX = "/_fortweb_proxy"
 KF_ONBOARDING_AUTH_NAMESPACE = "kf_onboarding"
 KF_ONBOARDING_AUTH_ALIAS_PREFIX = "kf-onboarding"
@@ -350,6 +352,8 @@ vaulting.configure_runtime(
     passcode_kdf_defaults=PASSCODE_KDF_DEFAULTS,
     default_settings=DEFAULT_SETTINGS,
     kf_state_subdb=KF_STATE_SUBDB,
+    roles_subdb=ROLES_SUBDB,
+    role_definitions_subdb=ROLE_DEFINITIONS_SUBDB,
 )
 transporting.configure_runtime(
     origin=_origin,

@@ -45,6 +45,8 @@ def configure_runtime(
     passcode_kdf_defaults: dict,
     default_settings: dict,
     kf_state_subdb: str,
+    roles_subdb: str,
+    role_definitions_subdb: str,
 ):
     _CONFIG.clear()
     _CONFIG.update(
@@ -59,6 +61,8 @@ def configure_runtime(
         passcode_kdf_defaults=dict(passcode_kdf_defaults),
         default_settings=dict(default_settings),
         kf_state_subdb=kf_state_subdb,
+        roles_subdb=roles_subdb,
+        role_definitions_subdb=role_definitions_subdb,
     )
 
 
@@ -327,9 +331,10 @@ async def _build_vault_state(record, *, bran: str = ""):
     modules = load_modules()
     keeper = modules["webkeeping"].WebKeeper(name=record["storageName"])
     baser = modules["webbasing"].WebBaser(name=record["storageName"])
-    kf_state_subdb = _CONFIG["kf_state_subdb"]
-    if kf_state_subdb not in baser.SubDbNames:
-        baser.SubDbNames = [*baser.SubDbNames, kf_state_subdb]
+    # The wallet's own sub-databases. A vault made before one was added simply starts with it empty.
+    for subdb in (_CONFIG["kf_state_subdb"], _CONFIG["roles_subdb"], _CONFIG["role_definitions_subdb"]):
+        if subdb not in baser.SubDbNames:
+            baser.SubDbNames = [*baser.SubDbNames, subdb]
     cf = NullConfiger()
     try:
         await keeper.reopen(storageOpener=_CONFIG["storage_opener"])
@@ -518,11 +523,24 @@ def _list_identifier_records(hby):
     return records
 
 
-def _get_identifier_record(hby, aid: str):
+def identifier_hab(hby, aid: str):
+    """The vault's identifier `aid`; NOT_FOUND when there is none."""
     hab = hby.habByPre(aid)
     if hab is None or hby.habByName(hab.name) is not hab:
         raise RuntimeFault("NOT_FOUND", f"Identifier '{aid}' was not found.")
-    return _identifier_record(hab)
+    return hab
+
+
+def _get_identifier_record(hby, aid: str):
+    return _identifier_record(identifier_hab(hby, aid))
+
+
+def create_identifier(hby, alias):
+    """A new identifier named `alias`, made the way identifiers.create makes one. The caller persists it."""
+    alias = require_text(alias, field="Identifier alias")
+    if hby.habByName(alias) is not None:
+        raise RuntimeFault("CONFLICT", f"Identifier alias '{alias}' already exists.")
+    return hby.makeHab(name=alias, icount=1, isith="1", ncount=1, nsith="1")
 
 
 def _dedupe(values):
@@ -909,11 +927,7 @@ async def dispatch(method: str, params: dict):
         return {"identifier": _get_identifier_record(hby, aid)}
 
     if method == "identifiers.create":
-        alias = require_text(params.get("alias"), field="Identifier alias")
-        if hby.habByName(alias) is not None:
-            raise RuntimeFault("CONFLICT", f"Identifier alias '{alias}' already exists.")
-
-        hby.makeHab(name=alias, icount=1, isith="1", ncount=1, nsith="1")
+        alias = create_identifier(hby, params.get("alias")).name
         reopened = await persist_and_reload()
         return {
             "identifier": _get_identifier_record(reopened["hby"], reopened["hby"].habByName(alias).pre),

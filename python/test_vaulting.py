@@ -46,6 +46,8 @@ class VaultlessSettingsTest(unittest.TestCase):
             passcode_kdf_defaults={},
             default_settings={"tempDatastore": False, "keyTier": "low"},
             kf_state_subdb="kfst.",
+            roles_subdb="frol.",
+            role_definitions_subdb="fdef.",
         )
         self.vaulting.ensure_registry = fail("ensure_registry")
         self.vaulting.load_modules = fail("load_modules")
@@ -136,6 +138,47 @@ class IdentifierNamespaceTest(unittest.TestCase):
         self.assertIs(hby.habByPre("internal"), internal)
 
 
+class IdentifierCreationTest(unittest.TestCase):
+    """identifiers.create and roles.takeOn make an identifier the same way."""
+
+    def setUp(self):
+        self.vaulting = _load_module()
+        self.made = []
+        habs = {"taken": SimpleNamespace(name="taken", pre="Etaken")}
+
+        def make_hab(**settings):
+            self.made.append(settings)
+            habs[settings["name"]] = SimpleNamespace(name=settings["name"], pre=f"E{settings['name']}")
+            return habs[settings["name"]]
+
+        self.hby = SimpleNamespace(
+            habByName=lambda name: habs.get(name),
+            habByPre=lambda pre: next((hab for hab in habs.values() if hab.pre == pre), None),
+            makeHab=make_hab,
+        )
+
+    def test_create_identifier_makes_a_single_key_identifier(self):
+        hab = self.vaulting.create_identifier(self.hby, " cashier ")
+        self.assertEqual(hab.name, "cashier")
+        self.assertEqual(self.made, [{"name": "cashier", "icount": 1, "isith": "1", "ncount": 1, "nsith": "1"}])
+
+    def test_create_identifier_refuses_a_taken_or_empty_alias(self):
+        for alias, code, message in (("taken", "CONFLICT", "Identifier alias 'taken' already exists."),
+                                     ("  ", "VALIDATION", "Identifier alias is required.")):
+            with self.subTest(alias=alias):
+                with self.assertRaises(self.vaulting.RuntimeFault) as raised:
+                    self.vaulting.create_identifier(self.hby, alias)
+                self.assertEqual((raised.exception.code, str(raised.exception)), (code, message))
+        self.assertEqual(self.made, [])
+
+    def test_identifier_hab_finds_an_identifier_or_is_not_found(self):
+        self.assertEqual(self.vaulting.identifier_hab(self.hby, "Etaken").name, "taken")
+        with self.assertRaises(self.vaulting.RuntimeFault) as raised:
+            self.vaulting.identifier_hab(self.hby, "Enope")
+        self.assertEqual((raised.exception.code, str(raised.exception)),
+                         ("NOT_FOUND", "Identifier 'Enope' was not found."))
+
+
 class VaultSetupTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.vaulting = _load_module()
@@ -185,8 +228,16 @@ class VaultSetupTest(unittest.IsolatedAsyncioTestCase):
             load_modules=lambda: modules,
             storage_opener=None,
             kf_state_subdb="kfst.",
+            roles_subdb="frol.",
+            role_definitions_subdb="fdef.",
         )
         self.record = {"id": "vault-test", "storageName": "test", "rootSalt": "salt"}
+
+    async def test_setup_declares_the_wallet_sub_databases_once(self):
+        self.baser.SubDbNames = ["evts."]
+        await self.vaulting._build_vault_state(self.record)
+        await self.vaulting._build_vault_state(self.record)
+        self.assertEqual(self.baser.SubDbNames, ["evts.", "kfst.", "frol.", "fdef."])
 
     async def test_setup_keeps_stores_open_for_the_returned_habery(self):
         state = await self.vaulting._build_vault_state(self.record)
@@ -288,6 +339,8 @@ class DefaultVaultTest(unittest.TestCase):
             passcode_kdf_defaults={"algorithm": "argon2id13", "salt": "NHCtv3Actrddf8jC", "opslimit": 2, "memlimit": 67_108_864, "outlen": 16},
             default_settings={},
             kf_state_subdb="kfst.",
+            roles_subdb="frol.",
+            role_definitions_subdb="fdef.",
         )
         store = _FakeStore()
         self.registry = {"db": _FakeRegistryDb(store), "store": store}
