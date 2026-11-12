@@ -381,7 +381,14 @@ roling.configure_runtime(
 )
 
 
+# Methods that change which vault is open (or close it). The engine's last read belongs to the vault it was made in,
+# so it is forgotten before any of these runs; a persist and reload inside one method keeps it.
+_VAULT_CHANGING_METHODS = frozenset({"vaults.open", "vaults.create", "vaults.close"})
+
+
 async def _dispatch(method: str, params: dict):
+    if method in _VAULT_CHANGING_METHODS:
+        roling.forget_last_read()
     if method.startswith("kf."):
         return await onboarding.dispatch(method, params)
     if method.startswith(("sources.", "roles.")):

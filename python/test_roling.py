@@ -56,15 +56,15 @@ def _load_roling():
         return _load("fortweb_roling_test", RUNTIME / "roling.py"), sourcing
 
 
-def _load_worker(roling, posted: list):
+def _load_worker(roling, posted: list, vaulting=None):
     """wallet-worker.py, loaded as the worker loads it, around this `roling`. What it posts to the page is appended
-    to `posted`. Its other modules are stand-ins that take their settings and do nothing."""
+    to `posted`. Its other modules are stand-ins that take their settings and do nothing (`vaulting` may be given)."""
     stand_in = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
                                      BrowserClienter=object)
     modules = {
         "js": types.SimpleNamespace(self=types.SimpleNamespace(postMessage=posted.append)),
         "polyscript": types.SimpleNamespace(config=types.SimpleNamespace(to_py=dict)),
-        "onboarding": stand_in, "transporting": stand_in, "vaulting": stand_in,
+        "onboarding": stand_in, "transporting": stand_in, "vaulting": vaulting or stand_in,
         "runtime_packages": types.SimpleNamespace(),
         "roling": roling,
     }
@@ -1039,6 +1039,87 @@ class WorkerDiagnosticTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([json.loads(message) for message in posted], [{
             "kind": "fortweb.runtime.diagnostic", "event": "source_fetch_unexpected_error", "level": "warning",
             "exception": "AttributeError", "host": "mad.example.test"}])
+
+
+class WorkerRequests:
+    """The worker's handle_request around a `roling`, with its runtime ready and every vaults.* method answered by a
+    stand-in that records it. roles.* use the FakeVaulting given to roling."""
+
+    def __init__(self, roling):
+        self.vault_methods = []
+
+        async def vault_dispatch(method, params):
+            self.vault_methods.append(method)
+            return {}
+        vaulting = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
+                                         dispatch=vault_dispatch)
+        self.worker = _load_worker(roling, [], vaulting)
+        ready = asyncio.get_running_loop().create_future()
+        ready.set_result(True)
+        self.worker._RUNTIME_READY_TASK = ready
+
+    async def __call__(self, method, params=None):
+        answer = json.loads(await self.worker.handle_request(json.dumps(
+            {"id": "1", "kind": "fortweb.runtime.request", "method": method, "params": params or {}})))
+        return answer["result"] if answer["ok"] else (answer["error"]["code"], answer["error"]["message"])
+
+
+class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
+    """The engine keeps its last read until the open vault changes (opened, created, locked or closed)."""
+
+    async def asyncSetUp(self):
+        self.roling, _ = _load_roling()
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        document = (FIXTURES / "source.json").read_bytes()
+        self.source_may_answer = asyncio.Event()
+        self.source_may_answer.set()
+        self.source_asked = asyncio.Event()
+
+        async def fetch_bytes(url, timeout_ms):
+            if url == ADDRESS:
+                self.source_asked.set()
+                await self.source_may_answer.wait()
+                return document
+            return files[url[len(BASE):-len(".json")]]
+        self.roling._fetch_bytes = fetch_bytes
+        self.request = WorkerRequests(self.roling)
+        self.roling.vaulting = FakeVaulting()
+
+    def take_on(self):
+        return self.request("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "identifier": {"mode": "new", "alias": "cashier"}})
+
+    async def test_forget_last_read_drops_the_read_and_any_read_in_flight(self):
+        await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+        started = self.roling._READS_STARTED
+        self.roling.forget_last_read()
+        self.assertIsNone(self.roling._LAST_READ)
+        self.assertEqual(self.roling._READS_STARTED, started + 1)
+
+    async def test_after_the_vault_changes_taking_on_a_role_needs_a_new_read(self):
+        for method in ("vaults.close", "vaults.open", "vaults.create"):
+            with self.subTest(method=method):
+                self.assertIn("source", await self.request("sources.read", {"address": "mad.seriouscoder.one"}))
+                await self.request(method, {"vaultId": VAULT})
+                self.assertEqual(self.request.vault_methods[-1], method)
+                self.assertEqual(await self.take_on(), ("CONFLICT", OPEN_AGAIN))
+
+    async def test_a_read_in_flight_when_the_vault_is_locked_is_not_kept(self):
+        self.source_may_answer.clear()
+        reading = asyncio.ensure_future(self.request("sources.read", {"address": "mad.seriouscoder.one"}))
+        await self.source_asked.wait()
+        await self.request("vaults.close", {"vaultId": VAULT})
+        self.source_may_answer.set()
+        self.assertIn("source", await reading)  # its caller still gets its answer
+        self.assertIsNone(self.roling._LAST_READ)
+        self.assertEqual(await self.take_on(), ("CONFLICT", OPEN_AGAIN))
+
+    async def test_other_methods_keep_the_read(self):
+        await self.request("sources.read", {"address": "mad.seriouscoder.one"})
+        await self.request("vaults.summary", {"vaultId": VAULT})
+        await self.request("vaults.list")
+        self.assertIn("role", await self.take_on())
 
 
 if __name__ == "__main__":

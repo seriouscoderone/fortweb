@@ -58,9 +58,18 @@ def _diagnose(event: str, **fields) -> None:
 
 # The full result of the newest sources.read, definitions included (taking on a role reads it). Reads run
 # concurrently: each takes a number when it starts, and its result is kept only if no newer read has started since,
-# so _LAST_READ always belongs to the most recently requested address or stays what it was.
+# so _LAST_READ always belongs to the most recently requested address or stays what it was. It is forgotten when the
+# open vault changes (forget_last_read).
 _LAST_READ: dict | None = None
 _READS_STARTED = 0
+
+
+def forget_last_read() -> None:
+    """Drops the last read, and any read still running (it is not kept when it finishes). The worker calls this when
+    the open vault changes, so a read made in one vault is never used to take on a role in another."""
+    global _LAST_READ, _READS_STARTED
+    _LAST_READ = None
+    _READS_STARTED += 1
 
 
 async def _settle(value):
