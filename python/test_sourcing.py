@@ -402,6 +402,15 @@ class RolesTest(unittest.TestCase):
         self.assertEqual(got["roles"], [{"role": "clerk", "responsibilities": [
             {"said": SAID_C, "alias": "q", "reliesOn": [], "attests": [], "outcome": None}]}])
 
+    def test_repeated_rr_listed_once_in_first_order(self):
+        defs = {
+            SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B, SAID_C, SAID_B, SAID_C]},
+            SAID_B: {"kind": "rr", "alias": "b", "role": "clerk"},
+            SAID_C: {"kind": "rr", "alias": "c", "role": "clerk"},
+        }
+        got = self.s.roles_of_selection(defs, SAID_A)
+        self.assertEqual([r["said"] for r in got["roles"][0]["responsibilities"]], [SAID_B, SAID_C])
+
     def test_malformed_members_ignored(self):
         defs = {
             SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B]},

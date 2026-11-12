@@ -311,8 +311,8 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     title = member(selection, "name") or member(selection, "alias")
 
     roles: dict[str, list[dict]] = {}
-    for said in selection["rrs"]:
-        rr = definitions.get(said) if is_said(said) else None
+    for said in dict.fromkeys(item for item in selection["rrs"] if is_said(item)):  # once each, first order kept
+        rr = definitions.get(said)
         if not isinstance(rr, dict) or rr.get("kind") != "rr" or not isinstance(rr.get("role"), str):
             continue
         relies_on = [
