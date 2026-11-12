@@ -20,6 +20,8 @@ export interface FixtureSourceOptions {
     tamper?: string;
     /** Serve a source document of 1,000,001 bytes. */
     oversize?: boolean;
+    /** Serve every definition as 1,000,001 bytes. */
+    oversizeDefinitions?: boolean;
     /** Answer source.json with 404, with a 200 text/html page, or with a 302 to another address on the host. */
     sourceAnswer?: 'missing' | 'html' | 'redirect';
     /** Hold the answer to source.json: `arrived` is called when its request comes in, the answer waits for `release`. */
@@ -53,13 +55,24 @@ function definitions(): Map<string, Buffer> {
         .map((name) => [name.slice(0, -'.json'.length), readFileSync(path.join(dir, name))]));
 }
 
-export async function routeFixtureSource(context: BrowserContext, options: FixtureSourceOptions = {}): Promise<void> {
-    // Oversize: the valid document padded with trailing spaces, so its size is its only fault.
+/** What the wallet has asked the fixture source for. */
+export interface FixtureSourceRequests {
+    /** The SAID of every definition requested so far, in the order the requests arrived. */
+    definitions: string[];
+}
+
+/** The bytes padded with trailing spaces to 1,000,001 bytes, so that their size is their only fault. */
+function oversized(bytes: Buffer): Buffer {
+    return Buffer.concat([bytes, Buffer.alloc(1_000_001 - bytes.length, 0x20)]);
+}
+
+export async function routeFixtureSource(
+    context: BrowserContext, options: FixtureSourceOptions = {},
+): Promise<FixtureSourceRequests> {
     const valid = fixtureSourceDocument();
-    const document = options.oversize
-        ? Buffer.concat([valid, Buffer.alloc(1_000_001 - valid.length, 0x20)])
-        : valid;
+    const document = options.oversize ? oversized(valid) : valid;
     const served = definitions();
+    const requests: FixtureSourceRequests = { definitions: [] };
     if (options.tamper !== undefined) {
         const original = served.get(options.tamper);
         if (original === undefined) {
@@ -94,11 +107,15 @@ export async function routeFixtureSource(context: BrowserContext, options: Fixtu
             return;
         }
         const said = DEFINITION_PATH.exec(pathname)?.[1];
+        if (said !== undefined) {
+            requests.definitions.push(said);
+        }
         const body = said === undefined ? undefined : served.get(said);
         if (body === undefined) {
             await route.fulfill({ status: 404, headers, body: '' });
             return;
         }
-        await route.fulfill({ status: 200, headers, body });
+        await route.fulfill({ status: 200, headers, body: options.oversizeDefinitions ? oversized(body) : body });
     });
+    return requests;
 }

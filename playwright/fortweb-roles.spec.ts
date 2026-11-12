@@ -185,6 +185,25 @@ test.describe('sources.read', () => {
         });
     });
 
+    test('a read stops at its byte budget when every definition is over 1,000,000 bytes', async ({ context, page }) => {
+        const requests = await routeFixtureSource(context, { oversizeDefinitions: true });
+        await openStartPage(page);
+        const outcome = await readSource(page, FIXTURE_HOST);
+        // Each fetch gives up at 1,000,001 bytes and four of them spend the read's 4,000,000 bytes: the first four
+        // of class-brick's definitions (in SAID order) are requested, the other 22 the source serves never are.
+        expect(requests.definitions).toEqual([
+            'ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1',
+            CLASS_BRICK,
+            'EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK',
+            'EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-',
+        ]);
+        // All three publications use at least one of those four, so each is a mismatch and nothing was checked.
+        expect(outcome.ok && outcome.result.publications.map((p) => [p.name, p.problem, p.roles])).toEqual([
+            ['class-brick', 'mismatch', []], ['dropin-class', 'mismatch', []], ['member-class', 'mismatch', []],
+        ]);
+        expect(outcome.ok && outcome.result.checked).toBe(0);
+    });
+
     for (const [answer, code, message] of [
         ['missing', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
         ['html', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
