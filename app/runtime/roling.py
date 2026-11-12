@@ -1,14 +1,20 @@
-"""Runtime methods for sources and roles: sources.read now; roles.* follow.
+"""Runtime methods for sources and roles: sources.read, roles.takeOn, roles.list and roles.remove.
 
 The read rules live in sourcing.py, which opens nothing. This module gives them the network (`js.fetch` with the
 options below), the Blake3 digest of the bundled wheel and the clock, and turns a SourceFault into the RuntimeFault
 the worker reports. Reading a source touches no vault. Nothing fetched is executed, rendered or made a link here.
-The worker gives this module its diagnostic emitter (configure_runtime).
+The roles.* methods keep what a vault has taken on in two sub-databases of the vault and never use the network:
+taking on a role uses the last read. The worker gives this module its diagnostic emitter and the sub-database names
+(configure_runtime).
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from inspect import isawaitable
+from uuid import uuid4
 
 import js
 
@@ -33,10 +39,12 @@ PROBE_MS = 3_000
 _CONFIG: dict = {}
 
 
-def configure_runtime(*, emit_diagnostic):
-    """`emit_diagnostic(event, *, level, **fields)` is the worker's diagnostic emitter."""
+def configure_runtime(*, emit_diagnostic, roles_subdb: str, role_definitions_subdb: str):
+    """`emit_diagnostic(event, *, level, **fields)` is the worker's diagnostic emitter; the two names are the vault
+    sub-databases of the roles taken on and of the definitions they need (vaulting declares them on every open)."""
     _CONFIG.clear()
-    _CONFIG.update(emit_diagnostic=emit_diagnostic)
+    _CONFIG.update(emit_diagnostic=emit_diagnostic, roles_subdb=roles_subdb,
+                   role_definitions_subdb=role_definitions_subdb)
 
 
 def _diagnose(event: str, **fields) -> None:
@@ -199,7 +207,174 @@ async def _sources_read(params: dict) -> dict:
     return {key: value for key, value in result.items() if key != "definitions"}
 
 
+# Roles taken on. A record keeps where the role came from and the SAIDs of every definition its view needs; the
+# definitions are kept once each, by SAID, as served. The view is derived again from them on every list, so a role
+# shows its responsibilities with no network.
+
+OPEN_AGAIN = "Open the address again before taking on a role."
+ALREADY_TAKEN = "This identifier has already taken on that role."
+NOT_APPOINTED = {"code": "NOT_APPOINTED", "message": "Not appointed yet"}
+
+
+@dataclass
+class RoleRecord:
+    id: str = ""
+    address: str = ""
+    host: str = ""
+    target: str = ""
+    publication: str = ""
+    title: str = ""
+    role: str = ""
+    responsibilities: list[str] = field(default_factory=list)
+    definitions: list[str] = field(default_factory=list)
+    aid: str = ""
+    taken_at: str = ""
+
+
+@dataclass
+class DefinitionRecord:
+    said: str = ""
+    text: str = ""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def _roles_store(hby):
+    return vaulting.load_modules()["koming"].Komer(db=hby.db, subkey=_CONFIG["roles_subdb"], klas=RoleRecord)
+
+
+def _definitions_store(hby):
+    return vaulting.load_modules()["koming"].Komer(db=hby.db, subkey=_CONFIG["role_definitions_subdb"],
+                                                   klas=DefinitionRecord)
+
+
+def _open_hby(params: dict):
+    return vaulting.require_open_state(vaulting.require_text(params.get("vaultId"), field="Vault"))["hby"]
+
+
+def _role_in_last_read(params: dict) -> tuple[dict, dict, dict]:
+    """The last read, the publication and the role it names, when the last read is of this address and holds that
+    publication without a problem and that role; CONFLICT otherwise."""
+    read = _LAST_READ
+    try:
+        address = sourcing.normalize_address(params.get("address") if isinstance(params.get("address"), str) else "")
+    except sourcing.SourceFault:
+        address = None
+    if read is None or address is None or read["source"]["address"] != address["address"]:
+        raise RuntimeFault("CONFLICT", OPEN_AGAIN)
+    publication = next((item for item in read["publications"]
+                        if item["target"] == params.get("target") and item["problem"] is None), None)
+    role = None if publication is None else next(
+        (item for item in publication["roles"] if item["role"] == params.get("role")), None)
+    if role is None:
+        raise RuntimeFault("CONFLICT", OPEN_AGAIN)
+    return read, publication, role
+
+
+def _needed(target: str, role: dict, definitions: dict) -> list[str]:
+    """Every SAID the role's view needs that the read checked: the selection, the role's responsibilities and what
+    they refer to. In first-use order, once each."""
+    saids = [target]
+    for responsibility in role["responsibilities"]:
+        saids.append(responsibility["said"])
+        refs = [*responsibility["reliesOn"], *responsibility["attests"]]
+        if responsibility["outcome"]:
+            refs.append(responsibility["outcome"])
+        saids.extend(ref["said"] for ref in refs)
+    return [said for said in dict.fromkeys(saids) if said in definitions]
+
+
+def _identifier_choice(params: dict) -> dict:
+    choice = params.get("identifier")
+    if not isinstance(choice, dict) or choice.get("mode") not in ("new", "existing"):
+        raise RuntimeFault("BAD_REQUEST", "Choose a new or an existing identifier.")
+    return choice
+
+
+def _role_view(hby, record: RoleRecord) -> dict:
+    stored = _definitions_store(hby)
+    definitions = {}
+    for said in record.definitions:
+        found = stored.get(keys=(said,))
+        if found is not None:
+            definitions[said] = json.loads(found.text)
+    selection = sourcing.roles_of_selection(definitions, record.target)
+    role = next((item for item in selection["roles"] if item["role"] == record.role), None)
+    hab = hby.habByPre(record.aid)
+    return {
+        "id": record.id, "address": record.address, "host": record.host, "target": record.target,
+        "publication": record.publication, "title": record.title, "role": record.role, "aid": record.aid,
+        "identifierAlias": hab.name if hab is not None else "", "takenAt": record.taken_at,
+        "responsibilities": role["responsibilities"] if role is not None else [],
+        "warnings": [dict(NOT_APPOINTED)],
+    }
+
+
+def _records(hby) -> list[RoleRecord]:
+    return [record for _, record in _roles_store(hby).getTopItemIter()]
+
+
+async def _roles_take_on(params: dict) -> dict:
+    hby = _open_hby(params)
+    read, publication, role = _role_in_last_read(params)
+    choice = _identifier_choice(params)
+    address = read["source"]["address"]
+    if choice["mode"] == "existing":
+        aid = vaulting.identifier_hab(hby, vaulting.require_text(choice.get("aid"), field="Identifier")).pre
+        if any((record.address, record.target, record.role, record.aid) == (address, publication["target"],
+                                                                            role["role"], aid)
+               for record in _records(hby)):
+            raise RuntimeFault("CONFLICT", ALREADY_TAKEN)
+    else:
+        aid = vaulting.create_identifier(hby, choice.get("alias")).pre
+
+    definitions = read["definitions"]
+    needed = _needed(publication["target"], role, definitions)
+    record = RoleRecord(
+        id=uuid4().hex, address=address, host=read["source"]["host"], target=publication["target"],
+        publication=publication["name"], title=publication["title"], role=role["role"],
+        responsibilities=[item["said"] for item in role["responsibilities"]], definitions=needed, aid=aid,
+        taken_at=_now(),
+    )
+    stored = _definitions_store(hby)
+    for said in needed:
+        stored.pin(keys=(said,), val=DefinitionRecord(said=said, text=definitions[said]))
+    _roles_store(hby).pin(keys=(record.id,), val=record)
+    reopened = await vaulting.persist_and_reload()
+    return {"role": _role_view(reopened["hby"], record)}
+
+
+async def _roles_list(params: dict) -> dict:
+    hby = _open_hby(params)
+    records = sorted(_records(hby), key=lambda record: record.taken_at, reverse=True)
+    return {"roles": [_role_view(hby, record) for record in records]}
+
+
+async def _roles_remove(params: dict) -> dict:
+    hby = _open_hby(params)
+    role_id = params.get("id")
+    roles = _roles_store(hby)
+    record = roles.get(keys=(role_id,)) if isinstance(role_id, str) and role_id else None
+    if record is None:
+        raise RuntimeFault("NOT_FOUND", "That role was not found.")
+    roles.rem(keys=(record.id,))
+    still_listed = {said for other in _records(hby) for said in other.definitions}
+    stored = _definitions_store(hby)
+    for said in record.definitions:
+        if said not in still_listed:
+            stored.rem(keys=(said,))
+    await vaulting.persist_and_reload()
+    return {"removed": True}
+
+
+_ROLE_METHODS = {"roles.takeOn": _roles_take_on, "roles.list": _roles_list, "roles.remove": _roles_remove}
+
+
 async def dispatch(method: str, params: dict) -> dict:
     if method == "sources.read":
         return await _sources_read(params)
-    raise RuntimeFault("BAD_REQUEST", f"Runtime method '{method}' is not available yet.")
+    if method in _ROLE_METHODS:
+        return await _ROLE_METHODS[method](params)
+    raise RuntimeFault("BAD_REQUEST", f"Runtime method '{method}' is not available.")

@@ -29,6 +29,7 @@ def _load(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    sys.modules[name] = module  # dataclasses look their module up by name
     spec.loader.exec_module(module)
     return module
 
@@ -158,12 +159,332 @@ class SourcesReadTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(newer["source"]["host"], "mad.seriouscoder.one")
         self.assertEqual(self.roling._LAST_READ["source"]["host"], "mad.seriouscoder.one")
 
-    async def test_method_not_yet_available(self):
-        for method in ("roles.list", "roles.takeOn", "roles.remove", "sources.other"):
+    async def test_unknown_method_is_a_bad_request(self):
+        for method in ("sources.other", "roles.other"):
             with self.subTest(method=method):
                 with self.assertRaises(RuntimeFault) as raised:
                     await self.roling.dispatch(method, {})
                 self.assertEqual(raised.exception.code, "BAD_REQUEST")
+
+
+# The roles a vault has taken on: roles.takeOn, roles.list and roles.remove over stand-ins for the vault.
+
+DROPIN = "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4"
+CLASS_BRICK = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY"
+VAULT = "my-wallet"
+OPEN_AGAIN = "Open the address again before taking on a role."
+ALREADY = "This identifier has already taken on that role."
+
+
+class FakeDb:
+    """What the stand-in Komer stores, by sub-database: {subkey: {keys: JSON text}}, as the vault's db keeps it."""
+
+    def __init__(self):
+        self.subdbs: dict = {}
+
+
+class FakeKomer:
+    """koming.Komer as roling uses it: get, pin, put, rem and getTopItemIter over one sub-database, values kept
+    as JSON so that what is read back is a new object, as from the real store."""
+
+    def __init__(self, *, db, subkey, klas):
+        if db.closed:
+            raise AssertionError("a closed vault was used")
+        self.items = db.db.subdbs.setdefault(subkey, {})
+        self.klas = klas
+
+    @staticmethod
+    def _key(keys):
+        return tuple(keys) if isinstance(keys, (tuple, list)) else (keys,)
+
+    def get(self, keys):
+        text = self.items.get(self._key(keys))
+        return None if text is None else self.klas(**json.loads(text))
+
+    def pin(self, keys, val):
+        import dataclasses
+        self.items[self._key(keys)] = json.dumps(dataclasses.asdict(val))
+        return True
+
+    def put(self, keys, val):
+        if self._key(keys) in self.items:
+            return False
+        return self.pin(keys, val)
+
+    def rem(self, keys):
+        return self.items.pop(self._key(keys), None) is not None
+
+    def getTopItemIter(self, keys=b""):
+        for key in sorted(self.items):
+            yield key, self.klas(**json.loads(self.items[key]))
+
+
+class FakeHab:
+    def __init__(self, name, pre):
+        self.name, self.pre = name, pre
+
+
+class FakeHby:
+    """A Habery stand-in. persist_and_reload closes it and gives a new one over the same data, as the real one does."""
+
+    def __init__(self, db: FakeDb, habs: dict):
+        self.closed = False
+        self._habs = habs
+        self.db = types.SimpleNamespace(db=db, closed=False)
+
+    def _check(self):
+        if self.closed:
+            raise AssertionError("a closed vault was used")
+
+    def habByName(self, name):
+        self._check()
+        return next((hab for hab in self._habs.values() if hab.name == name), None)
+
+    def habByPre(self, pre):
+        self._check()
+        return self._habs.get(pre)
+
+    def makeHab(self, name, **settings):
+        self._check()
+        assert settings == {"icount": 1, "isith": "1", "ncount": 1, "nsith": "1"}, settings
+        pre = f"E{len(self._habs):043d}"
+        self._habs[pre] = FakeHab(name, pre)
+        return self._habs[pre]
+
+
+class FakeVaulting:
+    """The vaulting functions roling uses, over one open vault."""
+
+    RuntimeFault = RuntimeFault
+
+    def __init__(self):
+        self.data = FakeDb()
+        self.habs: dict = {}
+        self.state = {"vault": {"id": VAULT}, "hby": FakeHby(self.data, self.habs)}
+        self.reloads = 0
+
+    def require_open_state(self, vault_id=None):
+        if self.state is None or (vault_id and vault_id != VAULT):
+            raise RuntimeFault("LOCKED", "Open a vault before calling vault operations.")
+        return self.state
+
+    async def persist_and_reload(self):
+        self.reloads += 1
+        self.state["hby"].closed = True
+        self.state["hby"].db.closed = True
+        self.state = {"vault": {"id": VAULT}, "hby": FakeHby(self.data, self.habs)}
+        return self.state
+
+    def require_text(self, value, *, field):
+        text = str(value or "").strip()
+        if not text:
+            raise RuntimeFault("VALIDATION", f"{field} is required.")
+        return text
+
+    def create_identifier(self, hby, alias):
+        alias = self.require_text(alias, field="Identifier alias")
+        if hby.habByName(alias) is not None:
+            raise RuntimeFault("CONFLICT", f"Identifier alias '{alias}' already exists.")
+        return hby.makeHab(name=alias, icount=1, isith="1", ncount=1, nsith="1")
+
+    def identifier_hab(self, hby, aid):
+        hab = hby.habByPre(aid)
+        if hab is None:
+            raise RuntimeFault("NOT_FOUND", f"Identifier '{aid}' was not found.")
+        return hab
+
+    def load_modules(self):
+        return {"koming": types.SimpleNamespace(Komer=FakeKomer)}
+
+
+class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.roling, self.sourcing = _load_roling()
+        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: None,
+                                      roles_subdb="frol.", role_definitions_subdb="fdef.")
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        document = (FIXTURES / "source.json").read_bytes()
+
+        async def fetch_bytes(url, timeout_ms):
+            if url == ADDRESS:
+                return document
+            return files[url[len(BASE):-len(".json")]]
+        self.roling._fetch_bytes = fetch_bytes
+        self.read = await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+
+        # From here on nothing may reach the network.
+        self.fetched = []
+
+        async def no_fetch(url, timeout_ms):
+            self.fetched.append(url)
+            raise AssertionError("roles.* must not fetch")
+        self.roling._fetch_bytes = no_fetch
+        self.roling.js = types.SimpleNamespace(fetch=lambda *args: self.fetched.append(args))
+        self.vault = FakeVaulting()
+        self.roling.vaulting = self.vault
+        self.clock = iter(f"2026-11-12T10:00:{second:02d}.000000+00:00" for second in range(60))
+        self.roling._now = lambda: next(self.clock)
+
+    def tearDown(self):
+        self.assertEqual(self.fetched, [])
+
+    def role_of_read(self, target, role):
+        publication = next(p for p in self.read["publications"] if p["target"] == target)
+        return next(r for r in publication["roles"] if r["role"] == role)
+
+    async def take_on(self, role="cashier", identifier=None, target=DROPIN, address="mad.seriouscoder.one"):
+        return await self.roling.dispatch("roles.takeOn", {
+            "vaultId": VAULT, "address": address, "target": target, "role": role,
+            "identifier": identifier or {"mode": "new", "alias": role},
+        })
+
+    async def fault(self, method, params):
+        with self.assertRaises(RuntimeFault) as raised:
+            await self.roling.dispatch(method, params)
+        return raised.exception.code, str(raised.exception)
+
+    def stored(self, subkey):
+        return self.vault.data.subdbs.get(subkey, {})
+
+    async def test_take_on_with_a_new_identifier_stores_the_role_and_its_definitions(self):
+        got = await self.take_on("cashier")
+        (pre, hab), = self.vault.habs.items()
+        self.assertEqual(hab.name, "cashier")
+        expected = self.role_of_read(DROPIN, "cashier")
+        view = got["role"]
+        self.assertEqual({key: value for key, value in view.items() if key != "id"}, {
+            "address": ADDRESS, "host": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class",
+            "title": "Drop-in takes a class", "role": "cashier", "aid": pre, "identifierAlias": "cashier",
+            "takenAt": "2026-11-12T10:00:00.000000+00:00", "responsibilities": expected["responsibilities"],
+            "warnings": [{"code": "NOT_APPOINTED", "message": "Not appointed yet"}],
+        })
+        self.assertEqual(len(view["id"]), 32)
+        self.assertEqual(self.vault.reloads, 1)
+
+        (key, text), = self.stored("frol.").items()
+        record = json.loads(text)
+        self.assertEqual(key, (view["id"],))
+        self.assertEqual(record["responsibilities"], [r["said"] for r in expected["responsibilities"]])
+        needed = {DROPIN}
+        for responsibility in expected["responsibilities"]:
+            needed.add(responsibility["said"])
+            refs = responsibility["reliesOn"] + responsibility["attests"] + [responsibility["outcome"] or {}]
+            needed.update(ref["said"] for ref in refs if ref.get("said") in self.roling._LAST_READ["definitions"])
+        self.assertEqual(set(record["definitions"]), needed)
+        self.assertEqual(len(record["definitions"]), len(needed))
+        self.assertEqual({key[0]: json.loads(text) for key, text in self.stored("fdef.").items()},
+                         {said: {"said": said, "text": self.roling._LAST_READ["definitions"][said]}
+                          for said in needed})
+
+    async def test_take_on_with_an_existing_identifier(self):
+        await self.take_on("cashier")
+        (pre, _), = self.vault.habs.items()
+        got = await self.take_on("instructor", {"mode": "existing", "aid": pre})
+        self.assertEqual((got["role"]["aid"], got["role"]["identifierAlias"]), (pre, "cashier"))
+        self.assertEqual(len(self.vault.habs), 1)
+        self.assertEqual(got["role"]["responsibilities"], self.role_of_read(DROPIN, "instructor")["responsibilities"])
+
+    async def test_the_same_role_twice_for_the_same_identifier_is_a_conflict(self):
+        await self.take_on("instructor")
+        (pre, _), = self.vault.habs.items()
+        self.assertEqual(await self.fault("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+            "identifier": {"mode": "existing", "aid": pre}}), ("CONFLICT", ALREADY))
+        self.assertEqual(len(self.stored("frol.")), 1)
+        # Another publication, or another identifier, is a different role taken on.
+        await self.take_on("instructor", {"mode": "existing", "aid": pre}, target=CLASS_BRICK)
+        await self.take_on("instructor", {"mode": "new", "alias": "instructor 2"})
+        self.assertEqual(len(self.stored("frol.")), 3)
+
+    async def test_take_on_needs_the_last_read_to_hold_that_role(self):
+        cases = {
+            "another address": dict(address="other.example.test"),
+            "an address that cannot be opened": dict(address="http://x"),
+            "a publication the read does not have": dict(target="E" + "A" * 43),
+            "a role the publication does not name": dict(role="janitor"),
+        }
+        for name, change in cases.items():
+            with self.subTest(name):
+                params = {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+                          "identifier": {"mode": "new", "alias": "x"}}
+                params.update(change)
+                self.assertEqual(await self.fault("roles.takeOn", params), ("CONFLICT", OPEN_AGAIN))
+        self.assertEqual((self.vault.habs, self.stored("frol."), self.vault.reloads), ({}, {}, 0))
+
+    async def test_take_on_with_no_read_or_a_publication_with_a_problem_is_a_conflict(self):
+        dropin = next(p for p in self.roling._LAST_READ["publications"] if p["target"] == DROPIN)
+        dropin["problem"], dropin["roles"] = "mismatch", []
+        self.assertEqual(await self.fault("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "identifier": {"mode": "new", "alias": "x"}}), ("CONFLICT", OPEN_AGAIN))
+        self.roling._LAST_READ = None
+        self.assertEqual(await self.fault("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": CLASS_BRICK, "role": "instructor",
+            "identifier": {"mode": "new", "alias": "x"}}), ("CONFLICT", OPEN_AGAIN))
+        self.assertEqual(self.vault.habs, {})
+
+    async def test_a_taken_alias_is_the_identifier_conflict(self):
+        await self.take_on("cashier")
+        self.assertEqual(await self.fault("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+            "identifier": {"mode": "new", "alias": "cashier"}}),
+            ("CONFLICT", "Identifier alias 'cashier' already exists."))
+        self.assertEqual(len(self.stored("frol.")), 1)
+
+    async def test_an_unknown_existing_identifier_is_not_found(self):
+        self.assertEqual(await self.fault("roles.takeOn", {
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "identifier": {"mode": "existing", "aid": "Enope"}}), ("NOT_FOUND", "Identifier 'Enope' was not found."))
+
+    async def test_a_bad_identifier_choice_is_a_bad_request(self):
+        for identifier in (None, "cashier", {"mode": "other"}):
+            with self.subTest(identifier=identifier):
+                code, _ = await self.fault("roles.takeOn", {
+                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+                    "identifier": identifier})
+                self.assertEqual(code, "BAD_REQUEST")
+
+    async def test_list_is_newest_first_and_derived_from_the_stored_definitions(self):
+        await self.take_on("cashier")
+        await self.take_on("instructor", target=CLASS_BRICK)
+        # The read is gone (the worker restarted): the list comes from the vault alone.
+        self.roling._LAST_READ = None
+        got = await self.roling.dispatch("roles.list", {"vaultId": VAULT})
+        self.assertEqual([(r["role"], r["publication"]) for r in got["roles"]],
+                         [("instructor", "class-brick"), ("cashier", "dropin-class")])
+        self.assertEqual(got["roles"][1]["responsibilities"], self.role_of_read(DROPIN, "cashier")["responsibilities"])
+        self.assertEqual(got["roles"][0]["responsibilities"],
+                         self.role_of_read(CLASS_BRICK, "instructor")["responsibilities"])
+        for role in got["roles"]:
+            self.assertEqual(role["warnings"], [{"code": "NOT_APPOINTED", "message": "Not appointed yet"}])
+        self.assertEqual(self.vault.reloads, 2)  # listing writes nothing
+
+    async def test_list_of_a_vault_with_no_roles_is_empty(self):
+        self.assertEqual(await self.roling.dispatch("roles.list", {"vaultId": VAULT}), {"roles": []})
+
+    async def test_list_needs_the_open_vault(self):
+        self.assertEqual((await self.fault("roles.list", {"vaultId": "other"}))[0], "LOCKED")
+
+    async def test_remove_deletes_the_record_and_only_the_definitions_no_other_role_lists(self):
+        dropin = (await self.take_on("instructor"))["role"]
+        instructor = (await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, target=CLASS_BRICK))["role"]
+        before = set(self.stored("fdef."))
+        records = {json.loads(text)["id"]: set(json.loads(text)["definitions"])
+                   for text in self.stored("frol.").values()}
+        self.assertTrue(records[dropin["id"]] & records[instructor["id"]])  # e.g. class-attended
+        self.assertEqual(await self.roling.dispatch("roles.remove", {"vaultId": VAULT, "id": dropin["id"]}),
+                         {"removed": True})
+        self.assertEqual(self.vault.reloads, 3)
+        self.assertEqual(list(self.stored("frol.")), [(instructor["id"],)])
+        self.assertEqual(set(self.stored("fdef.")), {(said,) for said in records[instructor["id"]]})
+        self.assertTrue(before - set(self.stored("fdef.")))
+        self.assertEqual(len(self.vault.habs), 2)  # the identifier stays
+        got = await self.roling.dispatch("roles.list", {"vaultId": VAULT})
+        self.assertEqual([r["id"] for r in got["roles"]], [instructor["id"]])
+
+    async def test_remove_of_an_unknown_role_is_not_found(self):
+        self.assertEqual((await self.fault("roles.remove", {"vaultId": VAULT, "id": "nope"}))[0], "NOT_FOUND")
+        self.assertEqual(self.vault.reloads, 0)
 
 
 URL = "https://mad.example.test/source.json"
@@ -292,7 +613,8 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
     def diagnostics(self) -> list:
         """Gives roling a diagnostic emitter, as the worker does; returns the (event, fields) it is called with."""
         emitted = []
-        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: emitted.append((event, fields)))
+        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: emitted.append((event, fields)),
+                                      roles_subdb="frol.", role_definitions_subdb="fdef.")
         return emitted
 
     async def test_read_uses_the_fixed_fetch_options_and_clears_its_timer(self):
@@ -543,7 +865,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
     async def test_report_that_cannot_be_made_does_not_change_the_fault(self):
         def emit(event, **fields):
             raise RuntimeError("the page is not listening")
-        self.roling.configure_runtime(emit_diagnostic=emit)
+        self.roling.configure_runtime(emit_diagnostic=emit, roles_subdb="frol.", role_definitions_subdb="fdef.")
         served = response(chunks=(b"x" * 1_234, RuntimeError("JsException: secret internal detail")))
 
         async def answer(url, options):
