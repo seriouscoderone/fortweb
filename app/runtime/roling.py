@@ -269,7 +269,7 @@ def _open_hby(params: dict):
 
 def _role_in_last_read(params: dict) -> tuple[dict, dict, dict]:
     """The last read, the publication and the role it names, when the last read is of this address and holds that
-    publication without a problem and that role; CONFLICT otherwise."""
+    publication (by target and name) without a problem and that role; CONFLICT otherwise."""
     read = _LAST_READ
     try:
         address = sourcing.normalize_address(params.get("address") if isinstance(params.get("address"), str) else "")
@@ -277,8 +277,10 @@ def _role_in_last_read(params: dict) -> tuple[dict, dict, dict]:
         address = None
     if read is None or address is None or read["source"]["address"] != address["address"]:
         raise RuntimeFault("CONFLICT", OPEN_AGAIN)
+    # Two publications may list one target: the name, as read, tells them apart.
     publication = next((item for item in read["publications"]
-                        if item["target"] == params.get("target") and item["problem"] is None), None)
+                        if item["target"] == params.get("target") and item["name"] == params.get("publication")
+                        and item["problem"] is None), None)
     role = None if publication is None else next(
         (item for item in publication["roles"] if item["role"] == params.get("role")), None)
     if role is None:

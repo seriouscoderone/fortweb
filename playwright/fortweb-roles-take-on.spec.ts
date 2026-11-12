@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     DROPIN_CLASS, setUpWallet, startRequest, finishRequest, rolesPage, NOT_APPOINTED_SENTENCE, OPEN_AGAIN,
-    ALREADY_TAKEN, CASHIER_DUTIES, showDropinRoles, myRoles, startTakingOn, takeOnWithNewIdentifier, unlock,
-    sendToBackgroundFor31Seconds,
+    editSource, openAddress, takeOnDialog, ALREADY_TAKEN, CASHIER_DUTIES, showDropinRoles, myRoles, startTakingOn,
+    takeOnWithNewIdentifier, unlock, sendToBackgroundFor31Seconds,
 } from './fixtures/roles.js';
 
 // Taking on a role and My roles.
@@ -111,6 +111,23 @@ test.describe('Taking on a role', () => {
         await expect(myRoles(page).items).toHaveCount(2);
     });
 
+    test('a role taken on from the second of two publications with one target lists that publication',
+        async ({ context, page }) => {
+            await routeFixtureSource(context, { edit: editSource((document) => {
+                document.publications.push({ ...document.publications[1], name: 'dropin-again' });
+            }) });
+            await setUpWallet(page);
+            await openAddress(page, FIXTURE_HOST);
+            const again = rolesPage(page).card('dropin-again');
+            await again.getByRole('button', { name: 'Show roles' }).click({ timeout: 90_000 });
+            await again.getByRole('button', { name: 'Take on cashier', exact: true }).click();
+            const dialog = takeOnDialog(page, 'cashier');
+            await dialog.takeOn.click();
+            await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+            await expect(myRoles(page).item('cashier').getByText('dropin-again at mad.example.test', { exact: true }))
+                .toBeVisible();
+        });
+
     test('the name offered is the role\'s, numbered when that alias is taken', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);
@@ -169,8 +186,8 @@ test.describe('Taking on a role', () => {
             await startRequest(page, 'vaults.open', { vaultId: 'my-wallet', passcode: 'roles-pass-1' });
             expect((await finishRequest(page)).ok).toBe(true);
             await startRequest(page, 'roles.takeOn', {
-                vaultId: 'my-wallet', address: FIXTURE_HOST, target: DROPIN_CLASS, role: 'cashier',
-                identifier: { mode: 'new', alias: 'cashier' },
+                vaultId: 'my-wallet', address: FIXTURE_HOST, target: DROPIN_CLASS, publication: 'dropin-class',
+                role: 'cashier', identifier: { mode: 'new', alias: 'cashier' },
             });
             expect(await finishRequest(page)).toEqual({ ok: false, code: 'CONFLICT', message: OPEN_AGAIN });
         });

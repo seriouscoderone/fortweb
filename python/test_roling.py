@@ -174,6 +174,7 @@ CLASS_BRICK = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY"
 VAULT = "my-wallet"
 OPEN_AGAIN = "Open the address again before taking on a role."
 ALREADY = "This identifier has already taken on that role."
+NAMES = {DROPIN: "dropin-class", CLASS_BRICK: "class-brick"}  # publication names in the fixture source
 
 
 class FakeDb:
@@ -358,9 +359,11 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         publication = next(p for p in self.read["publications"] if p["target"] == target)
         return next(r for r in publication["roles"] if r["role"] == role)
 
-    async def take_on(self, role="cashier", identifier=None, target=DROPIN, address="mad.seriouscoder.one"):
+    async def take_on(self, role="cashier", identifier=None, target=DROPIN, address="mad.seriouscoder.one",
+                      publication=None):
         return await self.roling.dispatch("roles.takeOn", {
-            "vaultId": VAULT, "address": address, "target": target, "role": role,
+            "vaultId": VAULT, "address": address, "target": target, "publication": publication or NAMES.get(target),
+            "role": role,
             "identifier": identifier or {"mode": "new", "alias": role},
         })
 
@@ -385,8 +388,9 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.snapshot(), before)
         return self.diagnostics
 
-    def params(self, role="instructor", identifier=None, target=DROPIN):
-        return {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": target, "role": role,
+    def params(self, role="instructor", identifier=None, target=DROPIN, publication=None):
+        return {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": target,
+                "publication": publication or NAMES.get(target), "role": role,
                 "identifier": identifier or {"mode": "new", "alias": "new one"}}
 
     async def test_a_store_that_cannot_write_leaves_nothing_behind(self):
@@ -437,7 +441,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         expected = self.role_of_read(DROPIN, "cashier")
         view = got["role"]
         self.assertEqual({key: value for key, value in view.items() if key != "id"}, {
-            "address": ADDRESS, "host": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class",
+            "address": ADDRESS, "host": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "publication": "dropin-class",
             "title": "Drop-in takes a class", "role": "cashier", "aid": pre, "identifierAlias": "cashier",
             "takenAt": "2026-11-12T10:00:00.000000+00:00", "responsibilities": expected["responsibilities"],
             "warnings": [{"code": "NOT_APPOINTED", "message": "Not appointed yet"}],
@@ -504,13 +508,51 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         first = next(p for p in read["publications"] if p["name"] == "first")
         as_read = first["roles"][0]["responsibilities"]
         self.assertEqual(as_read[0]["reliesOn"], [{"said": fact, "alias": "", "kind": "", "as": "payment"}])
-        taken = (await self.take_on("cashier", target=sel_a))["role"]
+        taken = (await self.take_on("cashier", target=sel_a, publication="first"))["role"]
         self.assertEqual(taken["responsibilities"], as_read)
         listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
         self.assertEqual(listed[0]["responsibilities"], as_read)
         record = json.loads(next(iter(self.stored("frol.").values())))
         self.assertNotIn(fact, record["definitions"])
         self.assertNotIn((fact,), self.stored("fdef."))
+
+    async def read_dropin_twice(self):
+        """The fixture source with dropin-class listed a second time, as "dropin-again"."""
+        document = json.loads((FIXTURES / "source.json").read_bytes())
+        dropin = next(p for p in document["publications"] if p["target"] == DROPIN)
+        document["publications"].append(dict(dropin, name="dropin-again"))
+        raw = json.dumps(document).encode()
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+
+        async def fetch_bytes(url, timeout_ms):
+            return raw if url == ADDRESS else files[url[len(BASE):-len(".json")]]
+        no_fetch = self.roling._fetch_bytes
+        self.roling._fetch_bytes = fetch_bytes
+        self.roling.js.performance = types.SimpleNamespace(now=lambda: 0.0)
+        await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+        self.roling._fetch_bytes = no_fetch
+
+    async def test_two_publications_with_one_target_are_told_apart_by_name(self):
+        await self.read_dropin_twice()
+        taken = (await self.take_on("cashier", publication="dropin-again"))["role"]
+        self.assertEqual(taken["publication"], "dropin-again")
+        taken = (await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, publication="dropin-class"))
+        self.assertEqual(taken["role"]["publication"], "dropin-class")
+        # Already taken on is decided by address, target, role and identifier, whichever name was used.
+        cashier = next(pre for pre, hab in self.vault.habs.items() if hab.name == "cashier")
+        self.assertEqual(await self.fault("roles.takeOn", self.params(
+            "cashier", {"mode": "existing", "aid": cashier}, publication="dropin-class")), ("CONFLICT", ALREADY))
+
+    async def test_a_missing_or_unknown_publication_name_is_a_conflict(self):
+        before = self.snapshot()
+        for publication in (None, "", "no-such-name", "class-brick", 7):
+            with self.subTest(publication=publication):
+                params = self.params("cashier")
+                params["publication"] = publication
+                if publication is None:
+                    del params["publication"]
+                self.assertEqual(await self.fault("roles.takeOn", params), ("CONFLICT", OPEN_AGAIN))
+        self.assertEqual(self.snapshot(), before)
 
     async def test_take_on_with_an_existing_identifier(self):
         await self.take_on("cashier")
@@ -524,7 +566,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         await self.take_on("instructor")
         (pre, _), = self.vault.habs.items()
         self.assertEqual(await self.fault("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "instructor",
             "identifier": {"mode": "existing", "aid": pre}}), ("CONFLICT", ALREADY))
         self.assertEqual(len(self.stored("frol.")), 1)
         # Another publication, or another identifier, is a different role taken on.
@@ -541,7 +583,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         }
         for name, change in cases.items():
             with self.subTest(name):
-                params = {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+                params = {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
                           "identifier": {"mode": "new", "alias": "x"}}
                 params.update(change)
                 self.assertEqual(await self.fault("roles.takeOn", params), ("CONFLICT", OPEN_AGAIN))
@@ -554,7 +596,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
                                ("  ", ("VALIDATION", "Identifier alias is required."))):
             with self.subTest(alias=alias):
                 self.assertEqual(await self.fault("roles.takeOn", {
-                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "instructor",
                     "identifier": {"mode": "new", "alias": alias}}), refusal)
                 self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.diagnostics, [])
@@ -563,32 +605,32 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         dropin = next(p for p in self.roling._LAST_READ["publications"] if p["target"] == DROPIN)
         dropin["problem"], dropin["roles"] = "mismatch", []
         self.assertEqual(await self.fault("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
             "identifier": {"mode": "new", "alias": "x"}}), ("CONFLICT", OPEN_AGAIN))
         self.roling._LAST_READ = None
         self.assertEqual(await self.fault("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": CLASS_BRICK, "role": "instructor",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": CLASS_BRICK, "publication": "class-brick", "role": "instructor",
             "identifier": {"mode": "new", "alias": "x"}}), ("CONFLICT", OPEN_AGAIN))
         self.assertEqual(self.vault.habs, {})
 
     async def test_a_taken_alias_is_the_identifier_conflict(self):
         await self.take_on("cashier")
         self.assertEqual(await self.fault("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "instructor",
             "identifier": {"mode": "new", "alias": "cashier"}}),
             ("CONFLICT", "Identifier alias 'cashier' already exists."))
         self.assertEqual(len(self.stored("frol.")), 1)
 
     async def test_an_unknown_existing_identifier_is_not_found(self):
         self.assertEqual(await self.fault("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
             "identifier": {"mode": "existing", "aid": "Enope"}}), ("NOT_FOUND", "Identifier 'Enope' was not found."))
 
     async def test_a_bad_identifier_choice_is_a_bad_request(self):
         for identifier in (None, "cashier", {"mode": "other"}):
             with self.subTest(identifier=identifier):
                 code, _ = await self.fault("roles.takeOn", {
-                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
                     "identifier": identifier})
                 self.assertEqual(code, "BAD_REQUEST")
 
@@ -1139,7 +1181,7 @@ class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
 
     def take_on(self):
         return self.request("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "cashier",
+            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
             "identifier": {"mode": "new", "alias": "cashier"}})
 
     async def test_forget_last_read_drops_the_read_and_any_read_in_flight(self):
