@@ -38,7 +38,9 @@ def _options(mode: str, signal):
     options.method = "GET"
     options.mode = mode
     options.credentials = "omit"
-    options.redirect = "error"
+    # The read refuses redirects. The no-cors probe cannot: a browser fails a no-cors fetch whose redirect mode is
+    # not "follow" before sending it. The probe's opaque answer is never read; it only shows that the host answered.
+    options.redirect = "error" if mode == "cors" else "follow"
     options.referrerPolicy = "no-referrer"
     options.cache = "no-store"
     options.signal = signal
