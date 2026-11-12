@@ -177,15 +177,20 @@ ALREADY = "This identifier has already taken on that role."
 
 
 class FakeDb:
-    """What the stand-in Komer stores, by sub-database: {subkey: {keys: JSON text}}, as the vault's db keeps it."""
+    """What the stand-in Komer stores, by sub-database: {subkey: {keys: serialized bytes}}, as the vault's db keeps
+    it."""
 
     def __init__(self):
         self.subdbs: dict = {}
 
 
 class FakeKomer:
-    """koming.Komer as roling uses it: get, pin, put, rem and getTopItemIter over one sub-database, values kept
-    as JSON so that what is read back is a new object, as from the real store."""
+    """koming.Komer as roling uses it: get, pin, put, rem and getTopItemIter over one sub-database.
+
+    Values are serialized and read back as the real store does (KERIpy koming, __serializeJSON and
+    __deserializeJSON; dataclasses.asdict stands in for dictify and the dataclass for datify): UTF-8 JSON bytes that
+    are not ASCII-escaped, so a value the real store cannot write fails here too, and what is read back is a new
+    object."""
 
     def __init__(self, *, db, subkey, klas):
         if db.closed:
@@ -197,13 +202,17 @@ class FakeKomer:
     def _key(keys):
         return tuple(keys) if isinstance(keys, (tuple, list)) else (keys,)
 
+    def _des(self, val):
+        return self.klas(**json.loads(bytes(val).decode("utf-8")))
+
     def get(self, keys):
-        text = self.items.get(self._key(keys))
-        return None if text is None else self.klas(**json.loads(text))
+        val = self.items.get(self._key(keys))
+        return None if val is None else self._des(val)
 
     def pin(self, keys, val):
         import dataclasses
-        self.items[self._key(keys)] = json.dumps(dataclasses.asdict(val))
+        self.items[self._key(keys)] = json.dumps(dataclasses.asdict(val), separators=(",", ":"),
+                                                 ensure_ascii=False).encode("utf-8")
         return True
 
     def put(self, keys, val):
@@ -216,7 +225,7 @@ class FakeKomer:
 
     def getTopItemIter(self, keys=b""):
         for key in sorted(self.items):
-            yield key, self.klas(**json.loads(self.items[key]))
+            yield key, self._des(self.items[key])
 
 
 class FakeHab:
