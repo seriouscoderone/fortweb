@@ -171,6 +171,17 @@ class IdentifierCreationTest(unittest.TestCase):
                 self.assertEqual((raised.exception.code, str(raised.exception)), (code, message))
         self.assertEqual(self.made, [])
 
+    def test_free_alias_checks_without_making(self):
+        self.assertEqual(self.vaulting.free_alias(self.hby, " cashier "), "cashier")
+        for alias, code, message in (("taken", "CONFLICT", "Identifier alias 'taken' already exists."),
+                                     ("  ", "VALIDATION", "Identifier alias is required."),
+                                     (None, "VALIDATION", "Identifier alias is required.")):
+            with self.subTest(alias=alias):
+                with self.assertRaises(self.vaulting.RuntimeFault) as raised:
+                    self.vaulting.free_alias(self.hby, alias)
+                self.assertEqual((raised.exception.code, str(raised.exception)), (code, message))
+        self.assertEqual(self.made, [])
+
     def test_identifier_hab_finds_an_identifier_or_is_not_found(self):
         self.assertEqual(self.vaulting.identifier_hab(self.hby, "Etaken").name, "taken")
         with self.assertRaises(self.vaulting.RuntimeFault) as raised:

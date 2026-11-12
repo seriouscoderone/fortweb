@@ -535,12 +535,18 @@ def _get_identifier_record(hby, aid: str):
     return _identifier_record(identifier_hab(hby, aid))
 
 
-def create_identifier(hby, alias):
-    """A new identifier named `alias`, made the way identifiers.create makes one. The caller persists it."""
+def free_alias(hby, alias):
+    """`alias` as a new identifier would be named, when it is present and no identifier of the vault has it;
+    VALIDATION or CONFLICT otherwise. Makes nothing."""
     alias = require_text(alias, field="Identifier alias")
     if hby.habByName(alias) is not None:
         raise RuntimeFault("CONFLICT", f"Identifier alias '{alias}' already exists.")
-    return hby.makeHab(name=alias, icount=1, isith="1", ncount=1, nsith="1")
+    return alias
+
+
+def create_identifier(hby, alias):
+    """A new identifier named `alias`, made the way identifiers.create makes one. The caller persists it."""
+    return hby.makeHab(name=free_alias(hby, alias), icount=1, isith="1", ncount=1, nsith="1")
 
 
 def _dedupe(values):
