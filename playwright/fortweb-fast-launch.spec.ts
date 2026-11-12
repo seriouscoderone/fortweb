@@ -52,7 +52,7 @@ test('the default vault prompts for the fingerprint before the runtime finishes 
     await page.getByRole('button', { name: 'Create wallet' }).click();
     await page.getByRole('dialog').filter({ hasText: 'Use fingerprint' })
         .getByRole('button', { name: 'Use fingerprint', exact: true }).click({ timeout: 180_000 });
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible();
 
     // Relaunch with a runtime that takes 6 s longer to start.
     await slowRuntime(page, 6_000);
@@ -67,7 +67,7 @@ test('the default vault prompts for the fingerprint before the runtime finishes 
     await expect(page.getByRole('progressbar')).toHaveAttribute('data-step', /^[1-3]$/, { timeout: 3_000 });
 
     // The vault opens once the runtime is ready, with exactly one fingerprint request.
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 240_000 });
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 240_000 });
     const retrieves = await page.evaluate(() =>
         (window as unknown as Record<string, Array<{ capability: string }>>)['__nativeLog']
             .filter((entry) => entry.capability === 'secret.retrieve').length);

@@ -130,7 +130,7 @@ test.describe('FortWeb smoke', () => {
         const vaultId = decodeURIComponent(unlockHash.match(/^#\/vaults\/([^/]+)\/unlock$/)?.[1] ?? '');
         expect(vaultId).toBeTruthy();
         await page.getByRole('button', { name: 'Open', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible();
         await page.getByRole('button', { name: 'Lock vault' }).click();
         await expect(page.getByRole('heading', { name: `Open ${vaultName}` })).toBeVisible();
 

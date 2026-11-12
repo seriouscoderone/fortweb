@@ -176,7 +176,7 @@ function sidebarNav(route: RouteRecord, vaultId: string, state: ShellState): str
         return pluginSidebarNav(
             route,
             vaultId,
-            state?.lastCoreRoutes?.[vaultId] || identifiersHref(vaultId),
+            state?.lastCoreRoutes?.[vaultId] || rolesHref(vaultId),
         );
     }
 

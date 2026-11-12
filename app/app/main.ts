@@ -1,10 +1,10 @@
 import { createRuntimeBridge } from "../runtime/bridge.js";
 import {
     homeHref,
-    identifiersHref,
     navigate,
     normalizeHash,
     parseRoute,
+    rolesHref,
     type Route,
     unlockHref,
 } from "./router.js";
@@ -236,13 +236,14 @@ function rememberCoreRoute(route: Route): void {
     }
 
     if (
+        route.name === "roles" ||
         route.name === "identifiers" ||
         route.name === "identifier-detail" ||
         route.name === "remotes" ||
         route.name === "remote-detail" ||
         route.name === "settings"
     ) {
-        session.rememberCoreRoute(vaultId, window.location.hash || identifiersHref(vaultId));
+        session.rememberCoreRoute(vaultId, window.location.hash || rolesHref(vaultId));
     }
 }
 
@@ -332,7 +333,7 @@ function initDrawer(vaults: VaultRecord[]): void {
         onVaultClick(vault: VaultRecord) {
             drawer?.close();
             if (isUnlocked(vault.id)) {
-                navigate(currentState().lastCoreRoutes[vault.id] || identifiersHref(vault.id));
+                navigate(currentState().lastCoreRoutes[vault.id] || rolesHref(vault.id));
                 return;
             }
             navigate(unlockHref(vault.id));
@@ -369,7 +370,7 @@ actions = {
         });
         await actions.refreshVaults(vaultId, assumeType<VaultSummary>(vault));
         drawer?.close();
-        navigate(currentState().lastCoreRoutes[vaultId] || identifiersHref(vaultId));
+        navigate(currentState().lastCoreRoutes[vaultId] || rolesHref(vaultId));
         return vault;
     },
 
@@ -580,7 +581,7 @@ async function render(): Promise<void> {
             const defaultVault = state.vaults.find((candidate) => candidate.isDefault);
             if (defaultVault) {
                 navigate(isUnlocked(defaultVault.id)
-                    ? state.lastCoreRoutes[defaultVault.id] || identifiersHref(defaultVault.id)
+                    ? state.lastCoreRoutes[defaultVault.id] || rolesHref(defaultVault.id)
                     : unlockHref(defaultVault.id));
                 return;
             }
@@ -617,7 +618,7 @@ async function render(): Promise<void> {
 
     const vaultId = route.params.vaultId;
     if (route.name === "unlock" && vaultId && isUnlocked(vaultId)) {
-        navigate(currentState().lastCoreRoutes[vaultId] || identifiersHref(vaultId));
+        navigate(currentState().lastCoreRoutes[vaultId] || rolesHref(vaultId));
         return;
     }
 

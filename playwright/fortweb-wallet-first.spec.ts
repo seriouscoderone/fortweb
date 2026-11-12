@@ -34,8 +34,8 @@ test('fresh install sets up the wallet, then launches straight into it', async (
 
     await confirm.fill('correct-horse-9');
     await create.click();
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
-    await expect(page).toHaveURL(/#\/vaults\/my-wallet\/identifiers$/);
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
+    await expect(page).toHaveURL(/#\/vaults\/my-wallet\/roles$/);
 
     // Next launch: straight to the default vault's unlock, no picker, no setup.
     await page.reload();
@@ -44,7 +44,7 @@ test('fresh install sets up the wallet, then launches straight into it', async (
 
     await page.getByLabel('Passcode').fill('correct-horse-9');
     await page.getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
 });
 
 test('Make default in Settings changes which vault opens at launch', async ({ page }) => {
@@ -54,7 +54,7 @@ test('Make default in Settings changes which vault opens at launch', async ({ pa
     await page.getByLabel('Passcode', { exact: true }).fill('first-pass-1');
     await page.getByLabel('Confirm passcode', { exact: true }).fill('first-pass-1');
     await page.getByRole('button', { name: 'Create wallet' }).click();
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
 
     // Advanced path: lock, then add a second vault from the drawer.
     await page.getByRole('button', { name: 'Lock vault' }).click();
@@ -74,7 +74,7 @@ test('Make default in Settings changes which vault opens at launch', async ({ pa
 
     await page.getByLabel('Passcode').fill('side-pass-1');
     await page.getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
     await page.evaluate(() => { window.location.hash = '#/vaults/side/settings'; });
     await expect(page.getByRole('heading', { name: 'Startup' })).toBeVisible({ timeout: 60_000 });
     await page.getByRole('button', { name: 'Make default' }).click();
@@ -91,7 +91,7 @@ test('a vault closed by a background runtime reset returns to its unlock screen'
     await page.getByLabel('Passcode', { exact: true }).fill('reset-pass-1');
     await page.getByLabel('Confirm passcode', { exact: true }).fill('reset-pass-1');
     await page.getByRole('button', { name: 'Create wallet' }).click();
-    await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 180_000 });
 
     // Leave a dialog open on a vault page, as in the field report.
     await page.evaluate(() => { window.location.hash = '#/vaults/my-wallet/remotes'; });
