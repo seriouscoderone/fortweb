@@ -187,6 +187,12 @@ class SourceDocumentTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assert_faults(_doc(**{name: value}))
 
+    def test_known_member_set_to_null_faults(self):
+        # mad-discovery refuses a known member that is present with the wrong type, null included.
+        for name in ["serves", "by", "oobi", "pages", "publications", "introductions", "catalogs"]:
+            with self.subTest(name=name):
+                self.assert_faults(_doc(**{name: None}))
+
     def test_serves_as_object_faults(self):
         self.assert_faults(_doc(serves={SAID_A: []}))
 
@@ -320,6 +326,30 @@ class ClosureTest(unittest.TestCase):
         for said in serves[DROPIN_CLASS]:
             self.assertIn(said, got)
             self.assertTrue(set(serves[said]) <= set(got))
+
+    def test_dropin_class_closure_exact(self):
+        # Worked out by hand from python/fixtures/mad/source.json (19 of the 26 served definitions).
+        self.assertEqual(self.s.closure(_fixture_serves(self.s), DROPIN_CLASS), [
+            "EA58Nm6t6HoMUEBJIrPNPoYc8qAVvyzRg5XYrzBimYP9",
+            "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1",
+            "EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK",
+            "EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-",
+            "EF56Ri4rLV0XIxs3S7kUqo0pnUl6PQ8Y65PHydnIDvvQ",
+            "EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx",
+            "EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3",
+            "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4",
+            "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB",
+            "EHC_ESsWWD0Y2UKuPcdAfd8LzZ1hPSA2Z9afFtFsOpjC",
+            "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U",
+            "EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69",
+            "EJoufOp-lX-0igGuBPemVZZTNUf7jTAQhkJsl6HqAmDu",
+            "ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn",
+            "ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7",
+            "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL",
+            "ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V",
+            "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz",
+            "EPpa3kIljRZ4bp1xvmbgqMxLulVq-LICBv0Z4Daz8U_i",
+        ])
 
     def test_target_not_served_gives_nothing(self):
         self.assertEqual(self.s.closure(_fixture_serves(self.s), SAID_A), [])
