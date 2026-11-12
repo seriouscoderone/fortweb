@@ -370,6 +370,23 @@ test.describe('Roles page', () => {
         }
     });
 
+    test('a role with no responsibilities shows no empty list', async ({ page }) => {
+        // A read never names a role without a responsibility; the fixture page's data has one ("visitor"). The
+        // fixture is opened once the app has started, so that start-up's last render does not replace it.
+        await openStartPage(page);
+        await page.evaluate(() => { window.location.hash = '#/_fixtures/roles'; });
+        const main = page.getByRole('main');
+        await main.getByRole('textbox', { name: 'Address' }).fill('example.org');
+        await main.getByRole('button', { name: 'Open', exact: true }).click();
+        await main.getByRole('button', { name: 'Show roles' }).click();
+        const items = main.locator('[data-roles-list] > li');
+        const visitor = items.filter({ has: page.getByRole('heading', { name: 'visitor', exact: true }) });
+        await expect(visitor).toHaveCount(1);
+        await expect(visitor.getByRole('list')).toHaveCount(0);
+        const frontDesk = items.filter({ has: page.getByRole('heading', { name: 'front-desk', exact: true }) });
+        await expect(frontDesk.getByRole('list')).toHaveCount(1);
+    });
+
     test('Show roles and Hide roles keep aria-expanded correct', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);

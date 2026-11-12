@@ -242,7 +242,11 @@ for (const width of [1440, 768, 411, 360]) {
         await expect(hide).toHaveAttribute('aria-expanded', 'true');
         const region = main.locator(`#${await hide.getAttribute('aria-controls')}`);
         await expect(region.getByRole('heading', { name: 'Front desk checks a visitor in' })).toBeVisible();
-        await expect(region.getByRole('button', { name: 'Take on', exact: true })).toBeDisabled();
+        const takeOn = region.getByRole('button', { name: /^Take on/ });
+        await expect(takeOn).toHaveCount(2);
+        for (const button of await takeOn.all()) {
+            await expect(button).toBeDisabled();
+        }
         await page.keyboard.press('Enter');
         await expect(main.getByRole('button', { name: 'Show roles' })).toHaveAttribute('aria-expanded', 'false');
         await expect(region).toBeHidden();

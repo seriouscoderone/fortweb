@@ -288,6 +288,7 @@ export const fixtureSourceView = {
                         },
                     ],
                 },
+                { role: "visitor", responsibilities: [] },
             ],
             problem: null,
         },

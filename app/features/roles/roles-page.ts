@@ -176,14 +176,17 @@ function roleItem(
         takeOn.disabled = true;
     }
     header.append(heading, takeOn);
+    item.append(header);
 
-    const duties = element("ul", "", "roles-role__duties");
-    for (const responsibility of role.responsibilities) {
-        const duty = element("li", responsibilityText(responsibility));
-        duty.dataset.responsibility = "true";
-        duties.append(duty);
+    if (role.responsibilities.length > 0) {
+        const duties = element("ul", "", "roles-role__duties");
+        for (const responsibility of role.responsibilities) {
+            const duty = element("li", responsibilityText(responsibility));
+            duty.dataset.responsibility = "true";
+            duties.append(duty);
+        }
+        item.append(duties);
     }
-    item.append(header, duties);
     return item;
 }
 
