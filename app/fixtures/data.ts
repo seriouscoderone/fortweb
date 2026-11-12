@@ -253,3 +253,43 @@ export const fixtureWatchers: FixtureWatcher[] = [
 ];
 
 export const FIXTURE_VAULT_ID_CONST = FIXTURE_VAULT_ID;
+
+/** A read of a small source, as `sources.read` answers it (for the Roles page fixture). */
+export const fixtureSourceView = {
+    source: {
+        address: "https://example.org/source.json",
+        host: "example.org",
+        by: null,
+        oobi: null,
+        introductions: 0,
+        catalogs: 0,
+    },
+    checked: 4,
+    dropped: { entries: 0, publications: 0 },
+    publications: [
+        {
+            target: "EAfixtureSelection000000000000000000000000000",
+            name: "front-desk-demo",
+            description: "A visitor arrives and is checked in.",
+            tags: ["demo"],
+            collection: "Fixture data",
+            by: null,
+            title: "Front desk checks a visitor in",
+            roles: [
+                {
+                    role: "front-desk",
+                    responsibilities: [
+                        {
+                            said: "EAfixtureCheckIn0000000000000000000000000000",
+                            alias: "checked-in",
+                            reliesOn: [{ said: "EAfixtureVisit00000000000000000000000000000", alias: "visit", kind: "fact", as: "arrival" }],
+                            attests: [{ said: "EAfixtureCheckedIn000000000000000000000000000", alias: "checked-in", kind: "fact" }],
+                            outcome: { said: "EAfixtureCheckedIn000000000000000000000000000", alias: "checked-in", kind: "fact" },
+                        },
+                    ],
+                },
+            ],
+            problem: null,
+        },
+    ],
+};

@@ -209,3 +209,46 @@ test('generic modal handles dynamic controls, fallback, destroy and reopen', asy
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+for (const width of [1440, 768, 411, 360]) {
+    test(`Roles page is reachable and usable from the keyboard (${width}px)`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto('/fortweb/app/index.html#/_fixtures/roles');
+        const main = page.getByRole('main');
+        const address = main.getByRole('textbox', { name: 'Address' });
+        await expect(address).toBeVisible();
+        // Reach the field through the ordinary keyboard order.
+        for (let index = 0; index < 20; index++) {
+            await page.keyboard.press('Tab');
+            if (await address.evaluate((element) => element === document.activeElement)) break;
+        }
+        await expect(address).toBeFocused();
+        await page.keyboard.type('example.org');
+        await page.keyboard.press('Tab');
+        await expect(main.getByRole('button', { name: 'Open', exact: true })).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect(main.getByRole('heading', { level: 2, name: 'example.org', exact: true })).toBeVisible();
+        await expect(page.locator('#fw-live-region')).toHaveText('example.org: 1 publication, 4 definitions checked');
+
+        const toggle = main.getByRole('button', { name: 'Show roles' });
+        for (let index = 0; index < 20; index++) {
+            await page.keyboard.press('Tab');
+            if (await toggle.evaluate((element) => element === document.activeElement)) break;
+        }
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press('Space');
+        const hide = main.getByRole('button', { name: 'Hide roles' });
+        await expect(hide).toBeFocused();
+        await expect(hide).toHaveAttribute('aria-expanded', 'true');
+        const region = main.locator(`#${await hide.getAttribute('aria-controls')}`);
+        await expect(region.getByRole('heading', { name: 'Front desk checks a visitor in' })).toBeVisible();
+        await expect(region.getByRole('button', { name: 'Take on', exact: true })).toBeDisabled();
+        await page.keyboard.press('Enter');
+        await expect(main.getByRole('button', { name: 'Show roles' })).toHaveAttribute('aria-expanded', 'false');
+        await expect(region).toBeHidden();
+
+        // Nothing on the page is wider than the screen.
+        expect(await page.evaluate(() => document.documentElement.scrollWidth
+            <= document.documentElement.clientWidth)).toBe(true);
+    });
+}
