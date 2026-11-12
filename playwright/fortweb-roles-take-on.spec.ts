@@ -3,7 +3,7 @@ import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     DROPIN_CLASS, setUpWallet, startRequest, finishRequest, rolesPage, NOT_APPOINTED_SENTENCE, OPEN_AGAIN,
     editSource, openAddress, takeOnDialog, ALREADY_TAKEN, CASHIER_DUTIES, showDropinRoles, myRoles, startTakingOn,
-    takeOnWithNewIdentifier, unlock, sendToBackgroundFor31Seconds,
+    takeOnWithNewIdentifier, unlock, sendToBackgroundFor31Seconds, recordAnnouncements, announced,
 } from './fixtures/roles.js';
 
 // Taking on a role and My roles.
@@ -194,6 +194,20 @@ test.describe('Taking on a role', () => {
             .getByRole('link', { name: 'Identifiers', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible();
         await expect(page.getByRole('link', { name: 'cashier', exact: true })).toHaveCount(0);
+    });
+
+    test('an empty name is shown, announced, and focus goes to the name field', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await dialog.name.fill('   ');
+        await recordAnnouncements(page);
+        await dialog.takeOn.click();
+        await expect(dialog.status).toHaveText('Enter a name for the new identifier.');
+        await expect(dialog.name).toBeFocused();
+        await expect.poll(() => announced(page)).toEqual(['Enter a name for the new identifier.']);
+        await expect(dialog.dialog).toBeVisible();
     });
 
     test('both dialog buttons are disabled while the wallet works', async ({ context, page }) => {

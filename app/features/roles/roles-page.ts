@@ -355,8 +355,11 @@ function openTakeOnDialog(
         } else {
             const alias = nameInput.value.trim();
             if (!alias) {
+                const message = "Enter a name for the new identifier.";
                 status.classList.remove("is-neutral");
-                status.textContent = "Enter a name for the new identifier.";
+                status.textContent = message;
+                announce(message, "assertive");
+                nameInput.focus();
                 return;
             }
             identifier = { mode: "new", alias };

@@ -236,3 +236,19 @@ export async function sendToBackgroundFor31Seconds(page: Page): Promise<void> {
         document.dispatchEvent(new Event('visibilitychange'));
     });
 }
+
+/** From now on, every text the live region announces is kept; `announced(page)` gives them (empty ones left out). */
+export async function recordAnnouncements(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        const announced: string[] = [];
+        (window as unknown as { announced: string[] }).announced = announced;
+        const region = document.querySelector('#fw-live-region');
+        if (!region) throw new Error('no live region');
+        new MutationObserver(() => announced.push(region.textContent ?? ''))
+            .observe(region, { childList: true, characterData: true, subtree: true });
+    });
+}
+
+export async function announced(page: Page): Promise<string[]> {
+    return page.evaluate(() => (window as unknown as { announced: string[] }).announced.filter((text) => text !== ''));
+}
