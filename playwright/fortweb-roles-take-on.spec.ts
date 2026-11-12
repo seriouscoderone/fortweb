@@ -250,6 +250,32 @@ test.describe('Taking on a role', () => {
             await expect(myRoles(page).items).toHaveCount(1);
         });
 
+    test('the open dialog fits a 320 px wide screen', async ({ context, page }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        const dialog = await startTakingOn(page, 'instructor');
+        await expect(dialog.selectExisting).toBeVisible();
+        await expect(dialog.dialog).toHaveClass(/is-visible/);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth
+            <= document.documentElement.clientWidth)).toBe(true);
+        const parts = {
+            dialog: dialog.dialog.locator('.lk-dialog'),
+            'Create a new identifier': dialog.dialog.locator('label').filter({ hasText: 'Create a new identifier' }),
+            'Select an existing identifier': dialog.dialog.locator('label')
+                .filter({ hasText: 'Select an existing identifier' }),
+            Cancel: dialog.cancel,
+            'Take on': dialog.takeOn,
+        };
+        for (const [name, part] of Object.entries(parts)) {
+            const box = await part.boundingBox({ timeout: 10_000 });
+            expect(box, name).not.toBeNull();
+            expect([name, box!.x >= 0 && box!.x + box!.width <= 320]).toEqual([name, true]);
+        }
+    });
+
     test('both dialog buttons are disabled while the wallet works', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);

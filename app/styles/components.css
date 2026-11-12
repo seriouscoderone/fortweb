@@ -2817,7 +2817,12 @@
     display: none;
 }
 
-/* The take-on dialog: the two identifier choices side by side, wrapping on a narrow screen. */
+/* The take-on dialog: the two identifier choices side by side, wrapping on a narrow screen. The shared dialog's
+   340px minimum is wider than a 320px phone screen; this dialog takes the width the screen leaves it. */
+.lk-dialog:has(.roles-take-on) {
+    min-width: 0;
+}
+
 .roles-take-on {
     display: grid;
     gap: var(--space-3);
