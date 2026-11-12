@@ -603,7 +603,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_take_on_with_no_read_or_a_publication_with_a_problem_is_a_conflict(self):
         dropin = next(p for p in self.roling._LAST_READ["publications"] if p["target"] == DROPIN)
-        dropin["problem"], dropin["roles"] = "mismatch", []
+        dropin["problem"] = "mismatch"  # its roles stay: only the problem can refuse it
         self.assertEqual(await self.fault("roles.takeOn", {
             "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "publication": "dropin-class", "role": "cashier",
             "identifier": {"mode": "new", "alias": "x"}}), ("CONFLICT", OPEN_AGAIN))
