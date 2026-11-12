@@ -654,6 +654,15 @@ class ReadSourceTest(unittest.TestCase):
             self.assertIsNone(got[target]["problem"])
             self.assertTrue(got[target]["roles"])
 
+    def test_each_publication_keeps_what_its_roles_were_derived_from(self):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        files[PAID_ADMISSION] = files[PAID_ADMISSION].replace(b"paid-admission", b"paid-admissiom", 1)
+        got = self.read(FakeSource(self.s, files=files))
+        serves = self.s.read_source_document((FIXTURES / "source.json").read_bytes(), ADDRESS)["document"]["serves"]
+        # Its own closure, not the whole read; nothing for a publication with a problem.
+        self.assertEqual(got["derivedFrom"], {target: self.s.closure(serves, target)
+                                              for target in (CLASS_BRICK, MEMBER_CLASS)})
+
     def test_altered_definition_is_not_counted_or_returned(self):
         files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
         files[CLASS_ATTENDED] = files[CLASS_ATTENDED] + b" "

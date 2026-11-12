@@ -394,7 +394,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, target=CLASS_BRICK)
         (pre, _), = self.vault.habs.items()
         needed = self.roling._needed(DROPIN, self.role_of_read(DROPIN, "instructor"),
-                                     self.roling._LAST_READ["definitions"])
+                                     self.roling._LAST_READ["derivedFrom"][DROPIN])
         shared = {said for said in json.loads(next(iter(self.stored("frol.").values())))["definitions"]}
         self.assertTrue(shared & set(needed) and set(needed) - shared)
         before = self.snapshot()
@@ -449,16 +449,68 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         record = json.loads(text)
         self.assertEqual(key, (view["id"],))
         self.assertEqual(record["responsibilities"], [r["said"] for r in expected["responsibilities"]])
+        # What the role's view refers to, within the publication's closure (what the read derived it from).
+        serves = self.sourcing.read_source_document((FIXTURES / "source.json").read_bytes(), ADDRESS)["document"]
+        reachable = set(self.sourcing.closure(serves["serves"], DROPIN))
         needed = {DROPIN}
         for responsibility in expected["responsibilities"]:
             needed.add(responsibility["said"])
             refs = responsibility["reliesOn"] + responsibility["attests"] + [responsibility["outcome"] or {}]
-            needed.update(ref["said"] for ref in refs if ref.get("said") in self.roling._LAST_READ["definitions"])
+            needed.update(ref["said"] for ref in refs if ref.get("said") in reachable)
         self.assertEqual(set(record["definitions"]), needed)
         self.assertEqual(len(record["definitions"]), len(needed))
         self.assertEqual({key[0]: json.loads(text) for key, text in self.stored("fdef.").items()},
                          {said: {"said": said, "text": self.roling._LAST_READ["definitions"][said]}
                           for said in needed})
+
+    async def read_two_selections(self):
+        """A source whose publication "first" (selection A, role cashier) relies on a fact that only publication
+        "second" (selection B) reaches through `refers`. The read derives A's roles from A's closure alone."""
+        import blake3
+        fill = "#" * 44
+
+        def make(body):
+            raw = json.dumps(dict(d=fill, **body), separators=(",", ":")).encode()
+            said = self.sourcing.encode_said(blake3.blake3(raw).digest())
+            return said, raw.replace(fill.encode(), said.encode())
+        fact, fact_raw = make({"kind": "fact", "alias": "payment-received"})
+        rr1, rr1_raw = make({"kind": "rr", "role": "cashier", "alias": "take-payment",
+                             "rely_on": [{"said": fact, "as": "payment"}]})
+        rr2, rr2_raw = make({"kind": "rr", "role": "clerk", "alias": "file-payment",
+                             "rely_on": [{"said": fact, "as": "payment"}]})
+        sel_a, sel_a_raw = make({"kind": "selection", "name": "Selection A", "rrs": [rr1]})
+        sel_b, sel_b_raw = make({"kind": "selection", "name": "Selection B", "rrs": [rr2]})
+        files = {fact: fact_raw, rr1: rr1_raw, rr2: rr2_raw, sel_a: sel_a_raw, sel_b: sel_b_raw}
+        publication = {"description": "", "tags": [], "collection": ""}
+        document = json.dumps({
+            "source": ADDRESS,
+            "serves": [{"said": sel_a, "refers": [rr1]}, {"said": rr1, "refers": []},
+                       {"said": sel_b, "refers": [rr2]}, {"said": rr2, "refers": [fact]}, {"said": fact, "refers": []}],
+            "publications": [dict(publication, target=sel_b, name="second"),
+                             dict(publication, target=sel_a, name="first")],
+        }).encode()
+
+        async def fetch_bytes(url, timeout_ms):
+            return document if url == ADDRESS else files[url[len(BASE):-len(".json")]]
+        no_fetch = self.roling._fetch_bytes
+        self.roling._fetch_bytes = fetch_bytes
+        self.roling.js.performance = types.SimpleNamespace(now=lambda: 0.0)
+        read = await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+        self.roling._fetch_bytes = no_fetch  # nothing more may reach the network
+        return read, sel_a, fact
+
+    async def test_a_stored_role_reads_as_the_read_showed_it(self):
+        read, sel_a, fact = await self.read_two_selections()
+        first = next(p for p in read["publications"] if p["name"] == "first")
+        as_read = first["roles"][0]["responsibilities"]
+        self.assertEqual(as_read[0]["reliesOn"], [{"said": fact, "alias": "", "kind": "", "as": "payment"}])
+        taken = (await self.take_on("cashier", target=sel_a))["role"]
+        self.assertEqual(taken["responsibilities"], as_read)
+        listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
+        self.assertEqual(listed[0]["responsibilities"], as_read)
+        record = json.loads(next(iter(self.stored("frol.").values())))
+        self.assertNotIn(fact, record["definitions"])
+        self.assertNotIn((fact,), self.stored("fdef."))
 
     async def test_take_on_with_an_existing_identifier(self):
         await self.take_on("cashier")

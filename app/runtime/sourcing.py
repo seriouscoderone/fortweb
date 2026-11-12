@@ -410,6 +410,9 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     definition returned, and what the fetch of a failed definition had read), nothing more is fetched, and a
     publication that still needs one gets problem "limit" (unless one of its definitions already failed, which is
     "mismatch"). Each definition is fetched at most once. A publication with a problem has no roles.
+
+    Besides what the page is shown, the result holds `definitions` (SAID -> checked text) and `derivedFrom` (target
+    -> the SAIDs of the checked definitions its roles were derived from, for each target without a problem).
     """
     where = normalize_address(text)
     host = where["host"]
@@ -431,6 +434,7 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
 
     fetched: dict[str, str | None] = {}  # said -> checked text, or None when it failed
     publications = []
+    derived_from: dict[str, list[str]] = {}  # target -> the checked SAIDs its roles were derived from
     for publication in document["publications"]:
         needed = closure(serves, publication["target"])
         cut = False
@@ -452,6 +456,8 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
         failed = any(said in fetched and fetched[said] is None for said in needed)
         problem = "mismatch" if not needed or failed else "limit" if cut else None
         selection = _roles(fetched, needed, publication["target"], whole=problem is None)
+        if problem is None:
+            derived_from[publication["target"]] = [said for said in needed if fetched.get(said) is not None]
         publications.append(dict(publication, title=selection["title"],
                                  roles=selection["roles"] if problem is None else [], problem=problem))
 
@@ -459,4 +465,4 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     source = {"address": document["source"], "host": host, "by": document["by"], "oobi": document["oobi"],
               "introductions": document["introductions"], "catalogs": document["catalogs"]}
     return {"source": source, "checked": len(definitions), "dropped": read["dropped"],
-            "publications": publications, "definitions": definitions}
+            "publications": publications, "definitions": definitions, "derivedFrom": derived_from}

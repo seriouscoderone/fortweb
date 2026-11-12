@@ -200,6 +200,10 @@ def _clock() -> float:
     return float(js.performance.now())
 
 
+# Parts of a read the engine keeps for taking on a role and never sends to the page.
+_ENGINE_ONLY = frozenset({"definitions", "derivedFrom"})
+
+
 async def _sources_read(params: dict) -> dict:
     global _LAST_READ, _READS_STARTED
     _READS_STARTED += 1
@@ -213,7 +217,7 @@ async def _sources_read(params: dict) -> dict:
         raise RuntimeFault(FAULT_CODES[fault.code], fault.message) from None
     if sequence == _READS_STARTED:
         _LAST_READ = result
-    return {key: value for key, value in result.items() if key != "definitions"}
+    return {key: value for key, value in result.items() if key not in _ENGINE_ONLY}
 
 
 # Roles taken on. A record keeps where the role came from and the SAIDs of every definition its view needs; the
@@ -282,9 +286,11 @@ def _role_in_last_read(params: dict) -> tuple[dict, dict, dict]:
     return read, publication, role
 
 
-def _needed(target: str, role: dict, definitions: dict) -> list[str]:
-    """Every SAID the role's view needs that the read checked: the selection, the role's responsibilities and what
-    they refer to. In first-use order, once each."""
+def _needed(target: str, role: dict, derived_from: list[str]) -> list[str]:
+    """Every SAID the role's view needs among those the read derived the publication's view from (its closure's
+    checked definitions): the selection, the role's responsibilities and what they refer to. In first-use order,
+    once each. So the stored role reads as the read showed it."""
+    used = set(derived_from)
     saids = [target]
     for responsibility in role["responsibilities"]:
         saids.append(responsibility["said"])
@@ -292,7 +298,7 @@ def _needed(target: str, role: dict, definitions: dict) -> list[str]:
         if responsibility["outcome"]:
             refs.append(responsibility["outcome"])
         saids.extend(ref["said"] for ref in refs)
-    return [said for said in dict.fromkeys(saids) if said in definitions]
+    return [said for said in dict.fromkeys(saids) if said in used]
 
 
 def _identifier_choice(params: dict) -> dict:
@@ -347,7 +353,7 @@ async def _roles_take_on(params: dict) -> dict:
         alias = vaulting.free_alias(hby, choice.get("alias"))
 
     definitions = read["definitions"]
-    needed = _needed(publication["target"], role, definitions)
+    needed = _needed(publication["target"], role, read["derivedFrom"][publication["target"]])
     record = RoleRecord(
         id=uuid4().hex, address=address, host=read["source"]["host"], target=publication["target"],
         publication=publication["name"], title=publication["title"], role=role["role"],
