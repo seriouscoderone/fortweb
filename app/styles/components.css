@@ -2769,3 +2769,95 @@
     color: var(--color-text);
     overflow-wrap: anywhere;
 }
+
+.roles-mine__list {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.roles-mine__item {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-table);
+    border-radius: var(--radius-field);
+    min-width: 0;
+}
+
+.roles-mine__item h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--color-text-dark);
+    overflow-wrap: anywhere;
+}
+
+.roles-warning {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-left: 3px solid var(--sys-warning);
+    border-radius: var(--radius-field);
+    background: var(--sys-warning-container);
+    font-size: 0.9rem;
+}
+
+.roles-warning__title {
+    font-weight: 600;
+    color: var(--sys-warning);
+}
+
+.roles-mine__remove {
+    justify-self: start;
+}
+
+.roles-mine .status-line:empty {
+    display: none;
+}
+
+/* The take-on dialog: the two identifier choices side by side, wrapping on a narrow screen. */
+.roles-take-on {
+    display: grid;
+    gap: var(--space-3);
+}
+
+.roles-take-on__choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+}
+
+.roles-take-on__legend {
+    grid-column: 1 / -1;
+    margin-bottom: var(--space-2);
+    padding: 0;
+    font-weight: 600;
+    color: var(--color-text-dark);
+}
+
+.roles-take-on__choice {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-2);
+    padding: var(--space-3);
+    cursor: pointer;
+    transition: none;
+}
+
+.roles-take-on .field[hidden],
+.roles-take-on [data-take-on-new][hidden] {
+    display: none;
+}
+
+.roles-take-on .kf-select {
+    width: 100%;
+}
+
+.roles-take-on .status-line:empty {
+    display: none;
+}

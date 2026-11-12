@@ -29,7 +29,13 @@ import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
 import { fingerprintState } from "../runtime/vault-fingerprint.js";
 import { METHODS } from "../runtime/method-catalog.js";
-import type { SourceView } from "../features/roles/roles-page.js";
+import {
+    readErrorMessage,
+    type KeptRead,
+    type SourceView,
+    type TakenRole,
+    type TakeOnRequest,
+} from "../features/roles/roles-page.js";
 import { postLog } from "../runtime/logger.js";
 import {
     describeRuntimeOriginContract,
@@ -60,10 +66,15 @@ type VaultSummary = {
     [key: string]: unknown;
 } | null;
 
+/** The Roles page's last read, for the vault it was made in. */
+type RolesRead = KeptRead & { vaultId: string };
+
 interface AppSessionState extends SessionState {
     vaults: VaultRecord[];
     vaultSummary: VaultSummary;
     remoteFilter: string;
+    /** Kept in memory only, and dropped whenever the open vault closes or changes. */
+    rolesRead: RolesRead | null;
 }
 
 type AppActions = LoadPageActions & ShellProps["actions"] & {
@@ -153,6 +164,7 @@ const session = createSessionStore({
     vaultSummary: null,
     vaults: [],
     remoteFilter: "all",
+    rolesRead: null,
 });
 
 let drawer: ReturnType<typeof createVaultDrawer> | null = null;
@@ -181,6 +193,7 @@ function handleVaultClosedUnderneath(reason: string): void {
         unlockedVaultId: null,
         vaultSummary: null,
         mobileNavOpen: false,
+        rolesRead: null,
     });
     closeAllModals();
     drawer?.close();
@@ -367,6 +380,7 @@ actions = {
             unlockedVaultId: vaultId,
             vaultSummary: assumeType<VaultSummary>(vault),
             mobileNavOpen: false,
+            rolesRead: null,
         });
         await actions.refreshVaults(vaultId, assumeType<VaultSummary>(vault));
         drawer?.close();
@@ -386,6 +400,7 @@ actions = {
             unlockedVaultId: null,
             vaultSummary: null,
             mobileNavOpen: false,
+            rolesRead: null,
         });
         await actions.refreshVaults(null, null);
         navigate(unlockHref(vault.id));
@@ -416,6 +431,7 @@ actions = {
             unlockedVaultId: null,
             vaultSummary: null,
             mobileNavOpen: false,
+            rolesRead: null,
         });
         await actions.refreshVaults(null, null).catch(() => null);
         navigate(unlockHref(vaultId));
@@ -431,7 +447,60 @@ actions = {
     },
 
     async readSource(address: string): Promise<SourceView> {
-        return bridge.request<SourceView & Record<string, unknown>>(METHODS.sourcesRead, { address });
+        // The newest read becomes the kept one, as it starts (the previous result is gone) and as it finishes, as
+        // long as no newer read has started and its vault is still the open one.
+        const vaultId = requireUnlockedVaultId();
+        let settle!: () => void;
+        const pending = new Promise<void>((resolve) => { settle = resolve; });
+        session.patch({ rolesRead: { vaultId, address, view: null, error: "", open: [], pending } });
+        const keep = (change: Partial<KeptRead>): void => {
+            const kept = currentState().rolesRead;
+            if (kept?.pending === pending && currentState().unlockedVaultId === vaultId) {
+                session.patch({ rolesRead: { ...kept, ...change, pending: null } });
+            }
+        };
+        try {
+            const view = await bridge.request<SourceView & Record<string, unknown>>(METHODS.sourcesRead, { address });
+            keep({ view });
+            return view;
+        } catch (error) {
+            keep({ error: readErrorMessage(error) });
+            throw error;
+        } finally {
+            settle();
+        }
+    },
+
+    lastRead(): KeptRead | null {
+        const kept = currentState().rolesRead;
+        return kept && kept.vaultId === currentState().unlockedVaultId ? kept : null;
+    },
+
+    showRoles(index: number, open: boolean): void {
+        const kept = actions.lastRead();
+        if (!kept) {
+            return;
+        }
+        const shown = kept.open.filter((item) => item !== index);
+        session.patch({ rolesRead: { ...currentState().rolesRead!, open: open ? [...shown, index] : shown } });
+    },
+
+    async takeOnRole(request: TakeOnRequest): Promise<TakenRole> {
+        const vaultId = requireUnlockedVaultId();
+        const { role } = await bridge.request<{ role: TakenRole }>(METHODS.rolesTakeOn, { vaultId, ...request });
+        if (request.identifier.mode === "new") {
+            const { vault } = await bridge.request<{ vault: VaultSummary }>(METHODS.vaultsSummary, { vaultId });
+            session.patch({ vaultSummary: vault });
+            await actions.refreshVaults(vaultId, vault);
+        }
+        await render();
+        return role;
+    },
+
+    async removeRole(id: string): Promise<void> {
+        const vaultId = requireUnlockedVaultId();
+        await bridge.request(METHODS.rolesRemove, { vaultId, id });
+        await render();
     },
 
     async resolveRemoteOobi(url: string, alias: string): Promise<void> {
@@ -679,6 +748,7 @@ async function render(): Promise<void> {
                 unlockedVaultId: null,
                 vaultSummary: null,
                 mobileNavOpen: false,
+                rolesRead: null,
             });
             await actions.refreshVaults(null, null).catch(() => null);
             if (thisGeneration !== renderGeneration) {

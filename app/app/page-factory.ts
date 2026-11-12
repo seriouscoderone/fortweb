@@ -5,7 +5,13 @@ import { renderIdentifierDetailPage } from "../features/identifiers/identifier-d
 import { renderIdentifiersPage } from "../features/identifiers/identifiers-page.js";
 import { renderRemoteDetailPage } from "../features/remotes/remote-detail-page.js";
 import { renderRemotesPage } from "../features/remotes/remotes-page.js";
-import { renderRolesPage, type SourceView } from "../features/roles/roles-page.js";
+import {
+    renderRolesPage,
+    type KeptRead,
+    type SourceView,
+    type TakenRole,
+    type TakeOnRequest,
+} from "../features/roles/roles-page.js";
 import { renderSettingsPage } from "../features/settings/settings-page.js";
 import { renderUnlockPage } from "../features/vaults/unlock-page.js";
 import { renderVaultPickerPage } from "../features/vaults/vault-picker-page.js";
@@ -55,6 +61,10 @@ interface PageActions {
     loadKfBootstrap(bootUrl?: string): Promise<WitnessOverviewProps["bootstrapState"]>;
     openVault(vaultId: string, passcode?: string): Promise<RecordValue>;
     readSource(address: string): Promise<SourceView>;
+    lastRead(): KeptRead | null;
+    showRoles(index: number, open: boolean): void;
+    takeOnRole(request: TakeOnRequest): Promise<TakenRole>;
+    removeRole(id: string): Promise<void>;
     refreshKfWatcherStatuses(watcherEids?: string[]): Promise<void>;
     resolveRemoteOobi(url: string, alias: string): Promise<void>;
     setRemoteFilter(filter: string): void;
@@ -123,9 +133,13 @@ export async function loadPage({
         return {
             page: renderRolesPage({
                 vault: assumeType<RolesPageProps["vault"]>(findVault(vaultId)),
-                roles: [],
-                identifiers: pageData.identifiers || [],
+                roles: assumeType<RolesPageProps["roles"]>(pageData.roles || []),
+                identifiers: assumeType<RolesPageProps["identifiers"]>(pageData.identifiers || []),
                 onReadSource: actions.readSource,
+                lastRead: actions.lastRead,
+                onShowRoles: actions.showRoles,
+                onTakeOn: actions.takeOnRole,
+                onRemove: actions.removeRole,
             }),
             vault: findVault(vaultId),
         };

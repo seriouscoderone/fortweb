@@ -22,6 +22,7 @@ export interface RouteDataResult {
     identifiers?: RecordValue[];
     remote?: RecordValue;
     remotes?: RecordValue[];
+    roles?: RecordValue[];
     settings?: RecordValue;
     watcherError?: string;
     watchers?: RecordValue[];
@@ -31,9 +32,12 @@ export interface RouteDataResult {
 
 export async function loadRouteData({ bridge, route }: RouteDataLoaderContext): Promise<RouteDataResult> {
     if (route.name === "roles") {
-        // Taken-on roles (roles.list) join this page with taking on a role; until then the list is empty.
         const vaultId = route.params.vaultId ?? "";
-        return bridge.request<{ identifiers: RecordValue[] }>(METHODS.identifiersList, { vaultId });
+        const { identifiers } = await bridge.request<{ identifiers: RecordValue[] }>(METHODS.identifiersList, {
+            vaultId,
+        });
+        const { roles } = await bridge.request<{ roles: RecordValue[] }>(METHODS.rolesList, { vaultId });
+        return { identifiers, roles };
     }
 
     if (route.name === "identifiers") {
