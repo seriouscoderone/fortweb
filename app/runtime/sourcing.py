@@ -181,11 +181,28 @@ def _no_constant(name):
     raise ValueError(f"{name} is not JSON")
 
 
+def _well_formed(value) -> None:
+    """ValueError when a string in `value`, member name or value, holds a lone surrogate (Python's json keeps the
+    escape "\\ud83d" as one): such text cannot be stored or sent as UTF-8. The nesting is already bounded."""
+    if isinstance(value, str):
+        value.encode("utf-8")  # UnicodeEncodeError is a ValueError
+    elif isinstance(value, list):
+        for item in value:
+            _well_formed(item)
+    elif isinstance(value, dict):
+        for name, item in value.items():
+            name.encode("utf-8")
+            _well_formed(item)
+
+
 def _parse_bounded(raw: bytes):
-    """JSON.parse's reading of the bytes, refused before it starts when nested deeper than JSON_DEPTH."""
+    """JSON.parse's reading of the bytes, refused before it starts when nested deeper than JSON_DEPTH, and refused
+    when any string in it is not well-formed Unicode."""
     if _depth(raw) > JSON_DEPTH:
         raise ValueError("nested too deep")
-    return json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+    parsed = json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+    _well_formed(parsed)
+    return parsed
 
 
 def _units(text: str) -> int:

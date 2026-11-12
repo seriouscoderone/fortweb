@@ -307,6 +307,19 @@ test.describe('Roles page', () => {
         expect(dialogs).toEqual([]);
     });
 
+    test('a source whose text is not well-formed Unicode is not a valid source', async ({ context, page }) => {
+        // JSON.stringify writes an unpaired surrogate as the escape \ud83d: valid JSON, but text that cannot be
+        // stored or sent as UTF-8.
+        await routeFixtureSource(context, { edit: editSource((document) => {
+            document.publications[1].name = 'dropin-class \ud83d';
+        }) });
+        await setUpWallet(page);
+        await openAddress(page, FIXTURE_HOST);
+        const roles = rolesPage(page);
+        await expect(roles.status).toHaveText('mad.example.test did not return a valid source.', { timeout: 90_000 });
+        await expect(roles.cards).toHaveCount(0);
+    });
+
     test('Open is disabled while a read runs, and a second submit does nothing', async ({ context, page }) => {
         const held = heldSource();
         await routeFixtureSource(context, { holdSource: held.option });

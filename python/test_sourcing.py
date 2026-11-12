@@ -174,6 +174,17 @@ class SourceDocumentTest(unittest.TestCase):
     def test_nesting_deeper_than_64_faults(self):
         self.assert_faults(_doc()[:-1] + b', "x": ' + b"[" * 64 + b"]" * 64 + b"}")
 
+    def test_a_lone_surrogate_in_any_string_faults(self):
+        # JSON escapes that Python's json keeps as one unpaired surrogate: such text cannot be stored or sent as
+        # UTF-8. Member names and values, at any depth.
+        for extra in (b'"x": "a\\ud83d"', b'"x\\udc00": 1', b'"x": [{"y": ["\\udfff"]}]', b'"x": {"\\ud800y": 1}'):
+            with self.subTest(extra=extra):
+                self.assert_faults(_doc()[:-1] + b", " + extra + b"}")
+
+    def test_a_surrogate_pair_reads(self):
+        got = self.read(_doc()[:-1] + b', "x": "\\ud83d\\ude00"}')
+        self.assertEqual(got["document"]["source"], ADDRESS)
+
     def test_nesting_of_64_reads(self):
         got = self.read(_doc()[:-1] + b', "x": ' + b"[" * 63 + b"]" * 63 + b"}")
         self.assertEqual(got["document"]["source"], ADDRESS)
@@ -630,6 +641,16 @@ class ReadSourceTest(unittest.TestCase):
         document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
         got = self.read(FakeSource(self.s, document=document, files={said: raw}))
         self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
+
+    def test_definition_with_a_lone_surrogate_is_a_mismatch(self):
+        for text in (b'"x":"a\\ud83d"', b'"x\\udc00":1'):
+            with self.subTest(text=text):
+                raw = b'{"d":"' + b"#" * 44 + b'",' + text + b"}"
+                said = self.s.encode_said(digest(raw))
+                raw = raw.replace(b"#" * 44, said.encode())
+                document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
+                got = self.read(FakeSource(self.s, document=document, files={said: raw}))
+                self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
 
     def test_limit_counts_failed_fetch_attempts(self):
         payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"  # in all three closures
