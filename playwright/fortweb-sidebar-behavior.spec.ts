@@ -134,6 +134,8 @@ test.describe('FortWeb sidebar behavior', () => {
 
         // Assert core nav links are present
         const sidebarNav = page.locator('.lk-sidebar__nav');
+        await expect(sidebarNav.getByRole('link').first()).toHaveText('Roles');
+        await expect(sidebarNav.getByRole('link', { name: 'Roles', exact: true })).toHaveAttribute('href', /\/roles$/);
         await expect(sidebarNav.getByRole('link', { name: 'Identifiers', exact: true })).toBeVisible();
         await expect(sidebarNav.getByRole('link', { name: 'Remote Identifiers', exact: true })).toBeVisible();
         await expect(sidebarNav.getByRole('link', { name: 'Settings', exact: true })).toBeVisible();

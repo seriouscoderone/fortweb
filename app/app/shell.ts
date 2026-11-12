@@ -4,6 +4,7 @@ import {
     kfHomeHref,
     kfIdentifiersHref,
     remotesHref,
+    rolesHref,
     kfWitnessesHref,
     kfWatchersHref,
     settingsHref,
@@ -68,6 +69,12 @@ function isCoreActive(routeName: string, target: string): boolean {
 
 function coreSidebarNav(route: RouteRecord, vaultId: string): string {
     const links: MenuLinkConfig[] = [
+        {
+            label: "Roles",
+            icon: "./assets/icons/interact.svg",
+            href: rolesHref(vaultId),
+            active: isCoreActive(route.name, "roles"),
+        },
         {
             label: "Identifiers",
             icon: "./assets/icons/identifiers.png",
