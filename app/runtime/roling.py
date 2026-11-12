@@ -51,16 +51,13 @@ def _options(mode: str, signal):
 
 
 async def _fetch_or_none(url: str, mode: str, timeout_ms: int):
-    """The response, or None when the fetch rejected; also whether the timeout fired. Clears its own timer."""
+    """The response, or None when the fetch rejected; also whether the timeout fired. Clears its timer on rejection."""
     controller = js.AbortController.new()
     fired = []
 
     def _abort():
         fired.append(True)
-        try:
-            controller.abort()
-        except Exception:
-            return
+        _abort_quietly(controller)
 
     timer = js.setTimeout(_abort, max(1, int(timeout_ms)))
     try:
@@ -70,9 +67,28 @@ async def _fetch_or_none(url: str, mode: str, timeout_ms: int):
         return None, controller, None, fired
 
 
+def _abort_quietly(controller) -> None:
+    try:
+        controller.abort()
+    except Exception:
+        pass
+
+
 async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
-    """The body of a 200 JSON response at `url`, at most sourcing.FILE_BYTES, within `timeout_ms`; else SourceFault."""
+    """The body of a 200 JSON response at `url`, at most sourcing.FILE_BYTES, within `timeout_ms`; else SourceFault.
+
+    Any unexpected error (a JsException, a malformed response) is UNREACHABLE; its text is never shown.
+    """
     host = sourcing.source_host(url)
+    try:
+        return await _fetch_checked(url, timeout_ms, host)
+    except sourcing.SourceFault:
+        raise
+    except Exception:
+        raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.") from None
+
+
+async def _fetch_checked(url: str, timeout_ms: int, host: str) -> bytes:
     response, controller, timer, fired = await _fetch_or_none(url, "cors", timeout_ms)
     if response is None:
         if fired:
@@ -110,10 +126,7 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
         return b"".join(chunks)
     finally:
         js.clearTimeout(timer)
-        try:
-            controller.abort()  # ends anything still open; a no-op once the body is read
-        except Exception:
-            pass
+        _abort_quietly(controller)  # ends anything still open; a no-op once the body is read
 
 
 def _digest(data: bytes) -> bytes:
