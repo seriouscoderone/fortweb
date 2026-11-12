@@ -88,12 +88,12 @@ test('a starting wallet shows a loading bar', async ({ page }) => {
 // A running CSS animation makes the page draw a frame on every screen refresh.
 // On a device that renders in software that load competes with the runtime
 // while it boots: it pushed the Android API 36 startup proof past the 30 s boot
-// budget. The bar therefore moves on a timer, a few steps per second, and
-// nothing is drawn in between.
-test('the loading bar moves in a few steps per second and runs no animation', async ({ page }) => {
+// budget. The bar therefore moves on a timer, one step a second, and nothing
+// is drawn in between.
+test('the loading bar moves one step a second and runs no animation', async ({ page }) => {
     test.setTimeout(300_000);
     await page.addInitScript(() => {
-        // Track the bar's timer (300 ms period) so the test can see it stop.
+        // Track the bar's timer (1 s period) so the test can see it stop.
         const w = window as unknown as Record<string, unknown>;
         const active = new Set<number>();
         w['__barTimers'] = active;
@@ -101,7 +101,7 @@ test('the loading bar moves in a few steps per second and runs no animation', as
         const realClear = window.clearInterval.bind(window);
         window.setInterval = ((handler: TimerHandler, delay?: number, ...rest: unknown[]) => {
             const id = realSet(handler, delay, ...rest);
-            if (delay === 300) active.add(id);
+            if (delay === 1000) active.add(id);
             return id;
         }) as typeof window.setInterval;
         window.clearInterval = ((id?: number) => {
@@ -120,18 +120,18 @@ test('the loading bar moves in a few steps per second and runs no animation', as
     await expect.poll(async () => page.evaluate(() => document.getAnimations().length),
         { timeout: 2_000 }).toBe(0);
 
-    // The bar still moves: between 2 and 5 steps a second, through several positions.
+    // The bar still moves, about one step a second, through several positions.
     const steps = await bar.evaluate(async (element) => {
         const seen: string[] = [];
         const observer = new MutationObserver(() => seen.push((element as HTMLElement).dataset['step'] ?? ''));
         observer.observe(element, { attributes: true, attributeFilter: ['data-step'] });
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await new Promise((resolve) => setTimeout(resolve, 3_500));
         observer.disconnect();
         return seen;
     });
-    expect(steps.length).toBeGreaterThanOrEqual(4);
-    expect(steps.length).toBeLessThanOrEqual(10);
-    expect(new Set(steps).size).toBeGreaterThanOrEqual(3);
+    expect(steps.length).toBeGreaterThanOrEqual(2);
+    expect(steps.length).toBeLessThanOrEqual(4);
+    expect(new Set(steps).size).toBeGreaterThanOrEqual(2);
 
     // Once no bar is showing, its timer stops.
     await expect(page.getByRole('heading', { name: 'Set up your wallet' })).toBeVisible({ timeout: 240_000 });

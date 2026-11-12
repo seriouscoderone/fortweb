@@ -2566,7 +2566,8 @@
 /*
  * Indeterminate loading bar: wallet start-up and vault opening.
  *
- * The marker moves between four positions on a timer (ui/primitives/loading-bar.ts).
+ * The marker moves between four positions, once a second, on a timer
+ * (ui/primitives/loading-bar.ts).
  * Keep it free of animations and transitions: a running animation draws a frame
  * on every screen refresh, which slows the runtime boot on devices that render
  * in software.

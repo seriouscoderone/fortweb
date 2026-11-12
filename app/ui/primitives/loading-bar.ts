@@ -5,15 +5,20 @@
  * draw a frame on every screen refresh for as long as it runs. On a device that
  * renders in software, that drawing competes with the wallet runtime while it
  * boots: on the Android API 36 CI emulator it pushed the boot past its 30 s
- * budget. The timer draws a few frames a second and nothing in between, and it
+ * budget. The timer draws one frame a second and nothing in between, and it
  * stops as soon as no bar is showing.
  */
 
 /** Positions the bar's marker moves through before starting again. */
 export const LOADING_BAR_STEPS = 4;
 
-/** Time between moves. Three moves a second reads as activity and costs little. */
-export const LOADING_BAR_STEP_MS = 300;
+/**
+ * Time between moves. Every move is one drawn frame, and on the CI emulator a
+ * frame is expensive: at three moves a second the startup proof passed with
+ * about a second of its 30 s budget left. One move a second still reads as
+ * activity and leaves the boot nearly undisturbed.
+ */
+export const LOADING_BAR_STEP_MS = 1000;
 
 let timer: number | null = null;
 
