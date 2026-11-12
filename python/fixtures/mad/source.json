@@ -1,0 +1,212 @@
+{
+  "source": "https://mad.seriouscoder.one/source.json",
+  "pages": true,
+  "serves": [
+    {
+      "said": "EA58Nm6t6HoMUEBJIrPNPoYc8qAVvyzRg5XYrzBimYP9",
+      "refers": [
+        "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1",
+        "EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3",
+        "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"
+      ]
+    },
+    {
+      "said": "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1",
+      "refers": []
+    },
+    {
+      "said": "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY",
+      "refers": [
+        "EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK",
+        "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz"
+      ]
+    },
+    {
+      "said": "ED_lwmuG4dDQfLtW93EbSuzg_Ur_mzfIBVqWbIh602PP",
+      "refers": [
+        "EN3vEFJBNNdONMz3dOPWhMAKhOv-XKHfGEXqE9jX8WLV"
+      ]
+    },
+    {
+      "said": "EDgPTyduh4297lcqDxSx1iDrEgBeWJURM2rk_LFq0NGh",
+      "refers": [
+        "ED_lwmuG4dDQfLtW93EbSuzg_Ur_mzfIBVqWbIh602PP",
+        "EN3vEFJBNNdONMz3dOPWhMAKhOv-XKHfGEXqE9jX8WLV"
+      ]
+    },
+    {
+      "said": "EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK",
+      "refers": [
+        "EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-",
+        "EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx",
+        "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"
+      ]
+    },
+    {
+      "said": "EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-",
+      "refers": [
+        "EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx"
+      ]
+    },
+    {
+      "said": "EF56Ri4rLV0XIxs3S7kUqo0pnUl6PQ8Y65PHydnIDvvQ",
+      "refers": []
+    },
+    {
+      "said": "EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx",
+      "refers": [
+        "ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn"
+      ]
+    },
+    {
+      "said": "EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3",
+      "refers": [
+        "ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7"
+      ]
+    },
+    {
+      "said": "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4",
+      "refers": [
+        "EA58Nm6t6HoMUEBJIrPNPoYc8qAVvyzRg5XYrzBimYP9",
+        "EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK",
+        "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U",
+        "EJoufOp-lX-0igGuBPemVZZTNUf7jTAQhkJsl6HqAmDu",
+        "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz",
+        "EPpa3kIljRZ4bp1xvmbgqMxLulVq-LICBv0Z4Daz8U_i"
+      ]
+    },
+    {
+      "said": "EG0KhmEywRn19YdO6GHKdrt-d1YPt-7glm7ovH_5i43S",
+      "refers": []
+    },
+    {
+      "said": "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB",
+      "refers": [
+        "ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn",
+        "ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V"
+      ]
+    },
+    {
+      "said": "EHC_ESsWWD0Y2UKuPcdAfd8LzZ1hPSA2Z9afFtFsOpjC",
+      "refers": [
+        "EFAvkd09h6QHoWcybDcqnPhRjREEQ8KpHA-fCZnSHLAx"
+      ]
+    },
+    {
+      "said": "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U",
+      "refers": [
+        "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1",
+        "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB",
+        "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"
+      ]
+    },
+    {
+      "said": "EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69",
+      "refers": [
+        "ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn",
+        "ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V"
+      ]
+    },
+    {
+      "said": "EJfIK_QhDYXcEpciRPUZhVc4ChUEh2EJLAZfn5veZUqL",
+      "refers": [
+        "EA58Nm6t6HoMUEBJIrPNPoYc8qAVvyzRg5XYrzBimYP9",
+        "EDgPTyduh4297lcqDxSx1iDrEgBeWJURM2rk_LFq0NGh",
+        "EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK",
+        "EJoufOp-lX-0igGuBPemVZZTNUf7jTAQhkJsl6HqAmDu",
+        "ENHekenqpWskcQLYIgk_Ld4rSTJuFwKE8SSl0CipbNsh",
+        "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz",
+        "EPpa3kIljRZ4bp1xvmbgqMxLulVq-LICBv0Z4Daz8U_i"
+      ]
+    },
+    {
+      "said": "EJoufOp-lX-0igGuBPemVZZTNUf7jTAQhkJsl6HqAmDu",
+      "refers": [
+        "EFGi5d0P_tlNrY6_qw8QqVZEjo3AgqBMHHeBJG7FL1i3",
+        "ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7"
+      ]
+    },
+    {
+      "said": "ELddHtVBJWvhi3ejavWnoH0AKT24I1dc2zNr5Z1Fo1Zn",
+      "refers": []
+    },
+    {
+      "said": "ELjeENxazY8bnEi4Uz3tAIAqwA0DFGFzANqiGiVHNdt7",
+      "refers": []
+    },
+    {
+      "said": "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL",
+      "refers": [
+        "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"
+      ]
+    },
+    {
+      "said": "EN3vEFJBNNdONMz3dOPWhMAKhOv-XKHfGEXqE9jX8WLV",
+      "refers": []
+    },
+    {
+      "said": "ENHekenqpWskcQLYIgk_Ld4rSTJuFwKE8SSl0CipbNsh",
+      "refers": [
+        "ED_lwmuG4dDQfLtW93EbSuzg_Ur_mzfIBVqWbIh602PP",
+        "EG0KhmEywRn19YdO6GHKdrt-d1YPt-7glm7ovH_5i43S",
+        "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB",
+        "EMSaOVmC4hKCUfwULHzziJ-eHEzFEb8qPrCp9Lm3kMlL"
+      ]
+    },
+    {
+      "said": "ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V",
+      "refers": []
+    },
+    {
+      "said": "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz",
+      "refers": [
+        "EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-",
+        "EF56Ri4rLV0XIxs3S7kUqo0pnUl6PQ8Y65PHydnIDvvQ",
+        "EHC_ESsWWD0Y2UKuPcdAfd8LzZ1hPSA2Z9afFtFsOpjC",
+        "EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69"
+      ]
+    },
+    {
+      "said": "EPpa3kIljRZ4bp1xvmbgqMxLulVq-LICBv0Z4Daz8U_i",
+      "refers": [
+        "EGVaGa3kbb3-tg3Z7lj2Q9urXxS71HNZkD3sIT99f-NB",
+        "EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69",
+        "ENx3CS8UcVw_Cu_0FrI_iWzvazO_kawwVo_OBxIaCs1V"
+      ]
+    }
+  ],
+  "publications": [
+    {
+      "target": "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY",
+      "name": "class-brick",
+      "description": "Test data from gym-bp: the class-brick selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    },
+    {
+      "target": "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4",
+      "name": "dropin-class",
+      "description": "Test data from gym-bp: the dropin-class selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    },
+    {
+      "target": "EJfIK_QhDYXcEpciRPUZhVc4ChUEh2EJLAZfn5veZUqL",
+      "name": "member-class",
+      "description": "Test data from gym-bp: the member-class selection.",
+      "tags": [
+        "gym",
+        "test-data"
+      ],
+      "collection": "gym-bp test data"
+    }
+  ],
+  "introductions": [],
+  "catalogs": []
+}
