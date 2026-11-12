@@ -322,6 +322,13 @@ function openTakeOnDialog(
     }
 
     const radios = Array.from(form.querySelectorAll<HTMLInputElement>("input[name='take-on-mode']"));
+    // The modal focuses its first control (Close) in its opening frame; this frame comes after it. On a phone the
+    // selected choice opens no keyboard, and Enter there takes on the role.
+    requestAnimationFrame(() => {
+        if (root.contains(document.activeElement) || document.activeElement === root) {
+            radios.find((radio) => radio.checked)?.focus({ preventScroll: true });
+        }
+    });
     function chosenMode(): "new" | "existing" {
         return radios.find((radio) => radio.checked)?.value === "existing" ? "existing" : "new";
     }

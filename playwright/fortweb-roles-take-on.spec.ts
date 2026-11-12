@@ -153,6 +153,49 @@ test.describe('Taking on a role', () => {
         await expect(myRoles(page).items).toHaveCount(1);
     });
 
+    test('the dialog opens with focus on the selected choice', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        const dialog = await startTakingOn(page, 'instructor');
+        await expect(dialog.createNew).toBeFocused();
+        // With the other choice selected it is that one which gets focus next time.
+        await dialog.selectExisting.check();
+        await dialog.cancel.click();
+        await expect(dialog.dialog).toHaveCount(0);
+        const again = await startTakingOn(page, 'instructor');
+        await expect(again.createNew).toBeChecked();
+        await expect(again.createNew).toBeFocused();
+    });
+
+    test('Enter in the name field takes on the role', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await dialog.name.fill('front cashier');
+        await dialog.name.press('Enter');
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        await expect(myRoles(page).item('cashier').getByText('Identifier: front cashier', { exact: true }))
+            .toBeVisible();
+    });
+
+    test('Escape closes the dialog and takes on nothing', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await expect(dialog.createNew).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(dialog.dialog).toHaveCount(0);
+        await expect(myRoles(page).items).toHaveCount(0);
+        await page.getByRole('navigation', { name: 'Vault navigation' })
+            .getByRole('link', { name: 'Identifiers', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible();
+        await expect(page.getByRole('link', { name: 'cashier', exact: true })).toHaveCount(0);
+    });
+
     test('both dialog buttons are disabled while the wallet works', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);
