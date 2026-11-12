@@ -253,9 +253,13 @@ function openTakeOnDialog(
     request: Omit<TakeOnRequest, "identifier">,
     identifiers: VaultIdentifier[],
     onTakeOn: NonNullable<RolesPageProps["onTakeOn"]>,
+    /** Shows the message of a take-on that failed after its dialog was closed (Escape, Close, the overlay). */
+    onFailedAfterClose: (message: string) => void,
 ): void {
     takeOnDialogs += 1;
     const dialogNumber = String(takeOnDialogs);
+    // Escape, Close and the overlay still close the dialog while the engine works; the take-on completes anyway.
+    let closed = false;
     const modal = createModal({
         title: `Take on ${request.role}`,
         body: `
@@ -285,6 +289,7 @@ function openTakeOnDialog(
             { label: "Cancel", tone: "ghost", dataAction: "cancel" },
             { label: "Take on", tone: "primary", dataAction: "submit" },
         ],
+        onClose: () => { closed = true; },
     });
     modal.open();
 
@@ -381,6 +386,10 @@ function openTakeOnDialog(
             focusShown(`[data-my-role="${CSS.escape(taken.id)}"] h3`);
         } catch (error) {
             const message = errorMessage(error, "The role could not be taken on.");
+            if (closed) {
+                onFailedAfterClose(message);
+                return;
+            }
             status.classList.remove("is-neutral");
             status.textContent = message;
             announce(message, "assertive");
@@ -666,7 +675,7 @@ export function renderRolesPage({
                     takeOn: take
                         ? (publication, role) => openTakeOnDialog(
                             { address: view.source.address, target: publication.target, publication: publication.name,
-                                role }, identifiers, take)
+                                role }, identifiers, take, takeOnFailedAfterClose)
                         : undefined,
                 }));
             }
@@ -674,6 +683,13 @@ export function renderRolesPage({
             function showError(message: string): void {
                 status.classList.remove("is-neutral");
                 status.textContent = message;
+            }
+
+            function takeOnFailedAfterClose(message: string): void {
+                if (shownNow()) {
+                    showError(message);
+                }
+                announce(message, "assertive");
             }
 
             function startReading(): void {

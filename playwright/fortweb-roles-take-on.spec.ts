@@ -228,6 +228,27 @@ test.describe('Taking on a role', () => {
         await expect(myRoles(page).item('instructor')).toHaveCount(1);
     });
 
+    test('a take-on that fails after its dialog was closed is shown on the page and announced once',
+        async ({ context, page }) => {
+            await routeFixtureSource(context);
+            await setUpWallet(page);
+            await showDropinRoles(page);
+            await takeOnWithNewIdentifier(page, 'cashier');
+            const dialog = await startTakingOn(page, 'instructor');
+            await dialog.name.fill('cashier');
+            await recordAnnouncements(page);
+            // The answer cannot arrive within this one task: the dialog is closed while the request is open.
+            await page.evaluate(() => {
+                (document.querySelector('[role="dialog"] [data-action="submit"]') as HTMLButtonElement).click();
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+            });
+            await expect(dialog.dialog).toHaveCount(0);
+            const message = 'Identifier alias \'cashier\' already exists.';
+            await expect(rolesPage(page).status).toHaveText(message, { timeout: 90_000 });
+            await expect.poll(() => announced(page)).toEqual([message]);
+            await expect(myRoles(page).items).toHaveCount(1);
+        });
+
     test('both dialog buttons are disabled while the wallet works', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);
