@@ -353,6 +353,15 @@ function openTakeOnDialog(
     }
     for (const radio of radios) {
         radio.addEventListener("change", showChoice);
+        // The form has no submit button of its own (Cancel and Take on are the modal's), so Enter on a choice would
+        // do nothing. It takes on the role as the "Take on" button does. The key's default is prevented so that it
+        // is handled once, also when the empty-name sentence moves the focus to the name field.
+        radio.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                void submit();
+            }
+        });
     }
 
     let working = false;

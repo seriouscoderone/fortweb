@@ -252,3 +252,56 @@ export async function recordAnnouncements(page: Page): Promise<void> {
 export async function announced(page: Page): Promise<string[]> {
     return page.evaluate(() => (window as unknown as { announced: string[] }).announced.filter((text) => text !== ''));
 }
+
+interface RuntimeRequestsWindow {
+    runtimeRequests: { sent: string[]; waiting: Array<{ method: string; deliver(): void }>; held: boolean };
+}
+
+/**
+ * Call before the app starts. Records the method of every request the page sends to its runtime worker, and can hold
+ * them: the page posts each request as one message on a MessagePort ([n, "handle_request", [request]]), and while
+ * the hold is on those messages wait, so a request stays unanswered until `release()` sends them on, in order.
+ */
+export async function watchRuntimeRequests(page: Page) {
+    await page.addInitScript(() => {
+        const requests: RuntimeRequestsWindow['runtimeRequests'] = { sent: [], waiting: [], held: false };
+        (window as unknown as RuntimeRequestsWindow).runtimeRequests = requests;
+        const post = MessagePort.prototype.postMessage as (this: MessagePort, ...args: unknown[]) => void;
+        MessagePort.prototype.postMessage = function (this: MessagePort, ...args: unknown[]): void {
+            const message = args[0];
+            let method = '';
+            if (Array.isArray(message) && message[1] === 'handle_request' && Array.isArray(message[2])) {
+                try {
+                    method = String((JSON.parse(String(message[2][0])) as { method?: unknown }).method ?? '');
+                } catch {
+                    method = ''; // the readiness probe is not a request
+                }
+            }
+            if (method) {
+                requests.sent.push(method);
+                if (requests.held) {
+                    requests.waiting.push({ method, deliver: () => post.apply(this, args) });
+                    return;
+                }
+            }
+            post.apply(this, args);
+        };
+    });
+    return {
+        /** How many requests for `method` the page has sent so far; one that is held counts. */
+        sent: (method: string) => page.evaluate((name) => (window as unknown as RuntimeRequestsWindow)
+            .runtimeRequests.sent.filter((sent) => sent === name).length, method),
+        /** How many requests for `method` are waiting behind the hold. */
+        held: (method: string) => page.evaluate((name) => (window as unknown as RuntimeRequestsWindow)
+            .runtimeRequests.waiting.filter((request) => request.method === name).length, method),
+        /** From now on the page's requests wait. */
+        hold: () => page.evaluate(() => {
+            (window as unknown as RuntimeRequestsWindow).runtimeRequests.held = true;
+        }),
+        release: () => page.evaluate(() => {
+            const requests = (window as unknown as RuntimeRequestsWindow).runtimeRequests;
+            requests.held = false;
+            for (const request of requests.waiting.splice(0)) request.deliver();
+        }),
+    };
+}

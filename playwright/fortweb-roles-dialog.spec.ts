@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { routeFixtureSource } from './fixtures/mad-source.js';
 import {
     setUpWallet, rolesPage, takeOnDialog, showDropinRoles, myRoles, startTakingOn, takeOnWithNewIdentifier,
-    recordAnnouncements, announced,
+    recordAnnouncements, announced, watchRuntimeRequests,
 } from './fixtures/roles.js';
 
 // The dialog that takes on a role.
@@ -52,6 +52,7 @@ test.describe('The take-on dialog', () => {
     });
 
     test('Enter in the name field takes on the role', async ({ context, page }) => {
+        const runtime = await watchRuntimeRequests(page);
         await routeFixtureSource(context);
         await setUpWallet(page);
         await showDropinRoles(page);
@@ -61,7 +62,118 @@ test.describe('The take-on dialog', () => {
         await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
         await expect(myRoles(page).item('cashier').getByText('Identifier: front cashier', { exact: true }))
             .toBeVisible();
+        expect(await runtime.sent('roles.takeOn')).toBe(1);
     });
+
+    test('Enter where the dialog opens takes on the role, with one request', async ({ context, page }) => {
+        const runtime = await watchRuntimeRequests(page);
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await expect(dialog.createNew).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect.poll(() => runtime.sent('roles.takeOn')).toBe(1);
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        await expect(myRoles(page).item('cashier').getByText('Identifier: cashier', { exact: true })).toBeVisible();
+        expect(await runtime.sent('roles.takeOn')).toBe(1);
+    });
+
+    test('Enter on the second choice, selected with an arrow key, takes on the role with the existing identifier',
+        async ({ context, page }) => {
+            const runtime = await watchRuntimeRequests(page);
+            await routeFixtureSource(context);
+            await setUpWallet(page);
+            await showDropinRoles(page);
+            await takeOnWithNewIdentifier(page, 'cashier');
+            const dialog = await startTakingOn(page, 'instructor');
+            await expect(dialog.createNew).toBeFocused();
+            await page.keyboard.press('ArrowDown');
+            await expect(dialog.selectExisting).toBeChecked();
+            await expect(dialog.selectExisting).toBeFocused();
+            await page.keyboard.press('Enter');
+            // Two requests so far: the cashier's, and this one.
+            await expect.poll(() => runtime.sent('roles.takeOn')).toBe(2);
+            await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+            await expect(myRoles(page).item('instructor').getByText('Identifier: cashier', { exact: true }))
+                .toBeVisible();
+            expect(await runtime.sent('roles.takeOn')).toBe(2);
+        });
+
+    test('Enter on a choice with an empty name shows the sentence and takes on nothing', async ({ context, page }) => {
+        const runtime = await watchRuntimeRequests(page);
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await expect(dialog.createNew).toBeFocused();
+        await dialog.name.fill('');
+        await dialog.createNew.focus();
+        await recordAnnouncements(page);
+        await page.keyboard.press('Enter');
+        await expect(dialog.status).toHaveText('Enter a name for the new identifier.');
+        await expect(dialog.name).toBeFocused();
+        await expect.poll(() => announced(page)).toEqual(['Enter a name for the new identifier.']);
+        await expect(dialog.dialog).toBeVisible();
+        await expect(myRoles(page).items).toHaveCount(0);
+        expect(await runtime.sent('roles.takeOn')).toBe(0);
+    });
+
+    test('Enter a second time while the wallet works sends nothing more', async ({ context, page }) => {
+        const runtime = await watchRuntimeRequests(page);
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await expect(dialog.createNew).toBeFocused();
+        // The request is held on its way to the runtime, so the wallet is still working when Enter comes again.
+        await runtime.hold();
+        try {
+            await page.keyboard.press('Enter');
+            await expect.poll(() => runtime.held('roles.takeOn')).toBe(1);
+            await expect(dialog.status).toHaveText('Taking on the role...');
+            await expect(dialog.takeOn).toBeDisabled();
+            await expect(dialog.createNew).toBeFocused();
+            await page.keyboard.press('Enter');
+            expect(await runtime.sent('roles.takeOn')).toBe(1);
+        } finally {
+            await runtime.release();
+        }
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        await expect(myRoles(page).items).toHaveCount(1);
+        expect(await runtime.sent('roles.takeOn')).toBe(1);
+    });
+
+    test('Space and the arrow keys select a choice, and Enter on Cancel or Close closes the dialog',
+        async ({ context, page }) => {
+            const runtime = await watchRuntimeRequests(page);
+            await routeFixtureSource(context);
+            await setUpWallet(page);
+            await showDropinRoles(page);
+            await takeOnWithNewIdentifier(page, 'cashier');
+            let dialog = await startTakingOn(page, 'instructor');
+            await expect(dialog.createNew).toBeFocused();
+            await page.keyboard.press('ArrowDown');
+            await expect(dialog.selectExisting).toBeChecked();
+            await expect(dialog.existing).toBeVisible();
+            await page.keyboard.press('ArrowUp');
+            await expect(dialog.createNew).toBeChecked();
+            await expect(dialog.name).toBeVisible();
+            await dialog.selectExisting.focus();
+            await page.keyboard.press('Space');
+            await expect(dialog.selectExisting).toBeChecked();
+            await dialog.cancel.focus();
+            await page.keyboard.press('Enter');
+            await expect(dialog.dialog).toHaveCount(0);
+            dialog = await startTakingOn(page, 'instructor');
+            await expect(dialog.createNew).toBeFocused();
+            await dialog.dialog.getByRole('button', { name: 'Close', exact: true }).focus();
+            await page.keyboard.press('Enter');
+            await expect(dialog.dialog).toHaveCount(0);
+            // None of these keys took on a role: the only request was the cashier's.
+            await expect(myRoles(page).items).toHaveCount(1);
+            expect(await runtime.sent('roles.takeOn')).toBe(1);
+        });
 
     test('Escape closes the dialog and takes on nothing', async ({ context, page }) => {
         await routeFixtureSource(context);
