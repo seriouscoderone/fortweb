@@ -69,6 +69,8 @@ class AddressTest(unittest.TestCase):
             "https://mad.seriouscoder.one/source.json": ("https://mad.seriouscoder.one/source.json", "https://mad.seriouscoder.one/"),
             "example.org/apps": ("https://example.org/apps/source.json", "https://example.org/apps/"),
             "EXAMPLE.org/apps/source.json": ("https://example.org/apps/source.json", "https://example.org/apps/"),
+            "example.org/apps/v1.2": ("https://example.org/apps/v1.2/source.json", "https://example.org/apps/v1.2/"),
+            "sub.example.co.uk": ("https://sub.example.co.uk/source.json", "https://sub.example.co.uk/"),
         }
         for text, (address, base) in cases.items():
             got = self.s.normalize_address(text)
@@ -81,6 +83,15 @@ class AddressTest(unittest.TestCase):
             "https://user@example.org", "https://user:pw@example.org", "example.org/?q=1", "example.org/#x",
             "127.0.0.1", "https://[::1]/source.json", "localhost", "app.localhost", "example.org.",
             "exa mple.org", "example.org/" + "a" * 600, "javascript:alert(1)", "//example.org",
+            # A browser reads these hosts as IPv4 addresses (WHATWG "ends in a number").
+            "2130706433", "0x7f.1", "127.1", "0x7f000001", "1.2.3", "example.123",
+            # A single label can only be a local name.
+            "intranet", "router/apps",
+            "https://example.org:/",
+            # Paths a browser would rewrite are refused, so the shown address is the fetched one.
+            "example.org/a/../b", "example.org/a/./b", "example.org/a\\b", "example.org/a%2e%2e/b",
+            "example.org/a%20b", "example.org/<script>", "example.org//x", "example.org/a\x00b",
+            "example.org/é",
         ]
         for text in bad:
             with self.assertRaises(self.s.SourceFault, msg=text) as raised:

@@ -20,6 +20,10 @@ MAX_ADDRESS = 512
 JSON_DEPTH = 64
 _IPV4 = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+# The last label of a public name starts with a letter, so a browser never reads the host as IPv4.
+_TOP_LABEL = re.compile(r"^[a-z][a-z0-9-]*$")
+# Only characters a browser keeps as typed, so the shown address is the fetched one.
+_PATH = re.compile(r"^[A-Za-z0-9._~/-]*$")
 _ENDING = "/source.json"
 
 
@@ -56,7 +60,7 @@ def check_said(served: bytes, said: str, *, digest) -> bool:
     return hashed.replace(FILL, needle) == served
 
 
-def _bad(text: str):
+def _bad():
     return SourceFault("BAD_ADDRESS", "That is not an address the wallet can open.")
 
 
@@ -64,33 +68,39 @@ def normalize_address(text: str) -> dict:
     """A host, a host with a path, or a full address -> the canonical https address ending /source.json."""
     raw = str(text or "").strip()
     if not raw or any(ch.isspace() for ch in raw) or len(raw) > MAX_ADDRESS:
-        raise _bad(raw)
+        raise _bad()
     if "://" not in raw:
         if raw.startswith("/") or ":" in raw.split("/", 1)[0]:
-            raise _bad(raw)
+            raise _bad()
         raw = "https://" + raw
     parts = urlsplit(raw)
     if parts.scheme != "https" or parts.query or parts.fragment or "?" in raw or "#" in raw:
-        raise _bad(raw)
+        raise _bad()
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
-        raise _bad(raw)
+        raise _bad()
     try:
         port = parts.port
     except ValueError:
-        raise _bad(raw) from None
+        raise _bad() from None
     host = (parts.hostname or "").lower()
+    # ":" in the netloc also refuses IPv6 literals ([::1]) and an empty port (example.org:).
     if port is not None or ":" in parts.netloc or not host or host.endswith("."):
-        raise _bad(raw)
-    if _IPV4.match(host) or host.startswith("[") or host == "localhost" or host.endswith(".localhost"):
-        raise _bad(raw)
+        raise _bad()
+    if _IPV4.match(host) or host == "localhost" or host.endswith(".localhost"):
+        raise _bad()
     if not _HOST.match(host):
-        raise _bad(raw)
+        raise _bad()
+    labels = host.split(".")
+    if len(labels) < 2 or not _TOP_LABEL.match(labels[-1]):
+        raise _bad()
     path = parts.path or "/"
+    if not _PATH.match(path) or "//" in path or any(seg in (".", "..") for seg in path.split("/")):
+        raise _bad()
     if not path.endswith(_ENDING):
         path = path.rstrip("/") + _ENDING
     address = f"https://{host}{path}"
     if len(address) > MAX_ADDRESS:
-        raise _bad(raw)
+        raise _bad()
     return {"address": address, "base": address[: -len("source.json")], "host": host}
 
 
