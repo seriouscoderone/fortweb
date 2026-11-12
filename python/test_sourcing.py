@@ -593,6 +593,26 @@ class ReadSourceTest(unittest.TestCase):
         self.assertEqual(got["publications"][0]["problem"], "mismatch")
         self.assertEqual(got["checked"], 0)
 
+    def test_definition_that_is_not_utf8_is_a_mismatch(self):
+        raw = b'{"d":"' + b"#" * 44 + b'","x":"\xff"}'
+        said = self.s.encode_said(digest(raw))
+        raw = raw.replace(b"#" * 44, said.encode())
+        document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
+        got = self.read(FakeSource(self.s, document=document, files={said: raw}))
+        self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
+
+    def test_limit_counts_failed_fetch_attempts(self):
+        payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"  # in all three closures
+        fake = FakeSource(self.s, fail={payment})
+        self.read(fake, definitions_per_read=12)
+        self.assertEqual(len(fake.definition_calls()), 12)
+
+    def test_mismatch_wins_over_limit(self):
+        payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"
+        got = self.by_target(self.read(FakeSource(self.s, fail={payment}), definitions_per_read=12))
+        # dropin-class is cut by the limit and also holds the failed definition.
+        self.assertEqual([got[t]["problem"] for t in (CLASS_BRICK, DROPIN_CLASS, MEMBER_CLASS)], ["mismatch"] * 3)
+
     def test_publication_whose_target_is_not_served_is_a_mismatch(self):
         document = _doc(serves=[], publications=[_publication(target=SAID_A)])
         fake = FakeSource(self.s, document=document, files={})
