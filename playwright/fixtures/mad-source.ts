@@ -26,6 +26,8 @@ export interface FixtureSourceOptions {
     sourceAnswer?: 'missing' | 'html' | 'redirect';
     /** Hold the answer to source.json: `arrived` is called when its request comes in, the answer waits for `release`. */
     holdSource?: { arrived(): void; release: Promise<void> };
+    /** Change the parsed source document before it is served (e.g. a publication's name, or the source's `by`). */
+    edit?(document: Record<string, unknown>): void;
 }
 
 export function fixtureSourceDocument(): Buffer {
@@ -69,7 +71,12 @@ function oversized(bytes: Buffer): Buffer {
 export async function routeFixtureSource(
     context: BrowserContext, options: FixtureSourceOptions = {},
 ): Promise<FixtureSourceRequests> {
-    const valid = fixtureSourceDocument();
+    let valid = fixtureSourceDocument();
+    if (options.edit) {
+        const parsed = JSON.parse(valid.toString('utf8')) as Record<string, unknown>;
+        options.edit(parsed);
+        valid = Buffer.from(JSON.stringify(parsed), 'utf8');
+    }
     const document = options.oversize ? oversized(valid) : valid;
     const served = definitions();
     const requests: FixtureSourceRequests = { definitions: [] };
