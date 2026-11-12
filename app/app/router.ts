@@ -3,6 +3,7 @@ type NavMode = "none" | "core" | "plugin";
 type RouteName =
     | "home"
     | "unlock"
+    | "roles"
     | "identifiers"
     | "identifier-detail"
     | "remotes"
@@ -82,6 +83,14 @@ export function parseRoute(hash = window.location.hash): Route {
             shellMode: "home",
             navMode: "none",
             requiresVault: true,
+        },
+        {
+            name: "roles",
+            regex: /^\/vaults\/([^/]+)\/roles$/,
+            shellMode: "vault",
+            navMode: "core",
+            requiresVault: true,
+            requiresUnlock: true,
         },
         {
             name: "identifiers",
@@ -199,6 +208,10 @@ export function homeHref(): string {
 
 export function unlockHref(vaultId: string): string {
     return `#/vaults/${encodeURIComponent(vaultId)}/unlock`;
+}
+
+export function rolesHref(vaultId: string): string {
+    return `#/vaults/${encodeURIComponent(vaultId)}/roles`;
 }
 
 export function identifiersHref(vaultId: string): string {
