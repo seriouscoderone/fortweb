@@ -204,7 +204,7 @@ def _publication(item) -> dict | None:
     if "by" in item and not (isinstance(item["by"], str) and AID_PATTERN.fullmatch(item["by"])):
         return None
     return {"target": item["target"], "name": item["name"], "description": item["description"],
-            "tags": list(tags), "collection": item["collection"]}
+            "tags": list(tags), "collection": item["collection"], "by": item.get("by")}
 
 
 def read_source_document(raw: bytes, address: str) -> dict:

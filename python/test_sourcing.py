@@ -147,7 +147,7 @@ class SourceDocumentTest(unittest.TestCase):
         self.assertIsNone(doc["by"])
         self.assertIsNone(doc["oobi"])
         self.assertEqual((doc["introductions"], doc["catalogs"]), (0, 0))
-        self.assertEqual(set(doc["publications"][0]), {"target", "name", "description", "tags", "collection"})
+        self.assertEqual(set(doc["publications"][0]), {"target", "name", "description", "tags", "collection", "by"})
 
     def test_fixture_serves_keeps_refers(self):
         doc = self.read((FIXTURES / "source.json").read_bytes())["document"]
@@ -245,6 +245,10 @@ class SourceDocumentTest(unittest.TestCase):
         self.assertEqual([p["target"] for p in got["document"]["publications"]], [SAID_A, SAID_B])
         self.assertEqual(got["dropped"], {"entries": 0, "publications": len(bad)})
 
+    def test_publication_by_returned_as_stated(self):
+        got = self.read(_doc(publications=[_publication(by="Eabc_-1"), _publication(target=SAID_B)]))
+        self.assertEqual([p["by"] for p in got["document"]["publications"]], ["Eabc_-1", None])
+
     def test_text_limits_count_utf16_units(self):
         # mad-discovery measures with JavaScript's String length: a character outside the BMP counts twice.
         got = self.read(_doc(publications=[_publication(name="\U0001F600" * 101), _publication(name="\U0001F600" * 100)]))
@@ -254,7 +258,7 @@ class SourceDocumentTest(unittest.TestCase):
     def test_unknown_member_inside_publication_ignored(self):
         got = self.read(_doc(publications=[_publication(icon="https://example.org/x.png")]))
         self.assertEqual(got["document"]["publications"],
-                         [{"target": SAID_A, "name": "n", "description": "d", "tags": ["t"], "collection": "c"}])
+                         [{"target": SAID_A, "name": "n", "description": "d", "tags": ["t"], "collection": "c", "by": None}])
         self.assertEqual(got["dropped"]["publications"], 0)
 
     def test_by_kept_when_an_aid(self):
