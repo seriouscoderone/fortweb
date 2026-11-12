@@ -248,6 +248,21 @@ for (const width of [1440, 768, 411, 360]) {
         await expect(main.getByRole('button', { name: 'Show roles' })).toHaveAttribute('aria-expanded', 'false');
         await expect(region).toBeHidden();
 
+        // My roles, with one role taken on: its parts are there, its Remove button is named after the role and the
+        // identifier (disabled on the fixture page, as Take on is), and it fits the screen.
+        const mine = main.getByRole('region', { name: 'My roles' });
+        const role = mine.getByRole('listitem')
+            .filter({ has: page.getByRole('heading', { level: 3, name: 'front-desk' }) });
+        await expect(role).toHaveCount(1);
+        await expect(role.getByText('front-desk-demo at example.org', { exact: true })).toBeVisible();
+        await expect(role.getByText('Identifier: front-desk', { exact: true })).toBeVisible();
+        await expect(role.getByText('Not appointed yet', { exact: true })).toBeVisible();
+        await expect(role.locator('[data-responsibility]')).toHaveCount(1);
+        await expect(role.getByRole('button', { name: 'Remove front-desk, identifier front-desk', exact: true }))
+            .toBeDisabled();
+        const box = await mine.boundingBox();
+        expect(box !== null && box.x >= 0 && box.x + box.width <= width).toBe(true);
+
         // Nothing on the page is wider than the screen.
         expect(await page.evaluate(() => document.documentElement.scrollWidth
             <= document.documentElement.clientWidth)).toBe(true);

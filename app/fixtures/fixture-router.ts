@@ -3,7 +3,7 @@ import { renderUnlockPage } from "../features/vaults/unlock-page.js";
 import { renderIdentifiersPage } from "../features/identifiers/identifiers-page.js";
 import { renderIdentifierDetailPage } from "../features/identifiers/identifier-detail-page.js";
 import { renderRemotesPage } from "../features/remotes/remotes-page.js";
-import { renderRolesPage, type SourceView } from "../features/roles/roles-page.js";
+import { renderRolesPage, type SourceView, type TakenRole } from "../features/roles/roles-page.js";
 import { renderRemoteDetailPage } from "../features/remotes/remote-detail-page.js";
 import { renderSettingsPage } from "../features/settings/settings-page.js";
 import { renderWitnessOverviewPage } from "../providers/kerifoundation/witness-overview-page.js";
@@ -22,6 +22,7 @@ import {
     fixtureWitnesses,
     fixtureWatchers,
     fixtureSourceView,
+    fixtureTakenRole,
     FIXTURE_VAULT_ID_CONST,
 } from "./data.js";
 
@@ -89,7 +90,7 @@ const FIXTURES: Record<string, FixtureFactory> = {
     roles: () => ({
         page: renderRolesPage({
             vault: fixtureVault,
-            roles: [],
+            roles: [fixtureTakenRole as TakenRole],
             identifiers: fixtureIdentifiers,
             onReadSource: async () => fixtureSourceView as SourceView,
         }),

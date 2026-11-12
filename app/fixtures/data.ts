@@ -294,3 +294,19 @@ export const fixtureSourceView = {
         },
     ],
 };
+
+/** A role this vault has taken on, as `roles.list` answers it (My roles on the Roles page fixture). */
+export const fixtureTakenRole = {
+    id: "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    address: "https://example.org/source.json",
+    host: "example.org",
+    target: fixtureSourceView.publications[0].target,
+    publication: fixtureSourceView.publications[0].name,
+    title: fixtureSourceView.publications[0].title,
+    role: "front-desk",
+    aid: "EAfixtureFrontDeskIdentifier000000000000000",
+    identifierAlias: "front-desk",
+    takenAt: "2026-11-12T10:00:00.000000+00:00",
+    responsibilities: fixtureSourceView.publications[0].roles[0].responsibilities,
+    warnings: [{ code: "NOT_APPOINTED", message: "Not appointed yet" }],
+};
