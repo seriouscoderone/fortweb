@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import unittest
@@ -468,6 +469,208 @@ class RolesTest(unittest.TestCase):
         got = self.s.roles_of_selection(defs, SAID_A)
         self.assertEqual(got["roles"][0]["responsibilities"],
                          [{"said": SAID_B, "alias": "r", "reliesOn": [], "attests": [], "outcome": None}])
+
+
+CLASS_BRICK = "EDVEy5suX6WPROMl6vSc5Kc4I86mXxyFsa_xBla4A_dY"
+MEMBER_CLASS = "EJfIK_QhDYXcEpciRPUZhVc4ChUEh2EJLAZfn5veZUqL"
+PAID_ADMISSION = "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U"  # an rr only dropin-class uses
+CLASS_ATTENDED = "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz"  # an rr of class-brick; all three use it
+BASE = "https://mad.seriouscoder.one/"
+
+
+class FakeSource:
+    """Serves the fixture source as fetch_bytes would, and records every call."""
+
+    def __init__(self, s, *, document: bytes | None = None, files: dict | None = None, fail=(), clock=None,
+                 ms_per_fetch: float = 0.0):
+        self.s = s
+        self.clock = clock
+        self.ms_per_fetch = ms_per_fetch
+        self.document = (FIXTURES / "source.json").read_bytes() if document is None else document
+        self.files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")} if files is None else files
+        self.fail = set(fail)
+        self.calls: list[tuple[str, int]] = []
+
+    async def fetch_bytes(self, url: str, timeout_ms: int) -> bytes:
+        self.calls.append((url, timeout_ms))
+        if self.clock is not None:
+            self.clock.now += self.ms_per_fetch
+        if url == ADDRESS:
+            return self.document
+        prefix = BASE + "definitions/"
+        said = url[len(prefix):-len(".json")] if url.startswith(prefix) and url.endswith(".json") else None
+        if said in self.fail or said not in self.files:
+            raise self.s.SourceFault("UNREACHABLE", "Could not reach mad.seriouscoder.one.")
+        return self.files[said]
+
+    def definition_calls(self) -> list[str]:
+        return [url for url, _ in self.calls if url != ADDRESS]
+
+
+class Clock:
+    """Milliseconds; time moves only when a FakeSource fetch takes it forward."""
+
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class ReadSourceTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+
+    def read(self, fake: FakeSource, text: str = "mad.seriouscoder.one", clock=None, **over) -> dict:
+        return asyncio.run(self.s.read_source(text, fetch_bytes=fake.fetch_bytes, digest=digest,
+                                              clock=clock or Clock(), **over))
+
+    def by_target(self, got: dict) -> dict:
+        return {p["target"]: p for p in got["publications"]}
+
+    def test_full_read_of_the_fixture(self):
+        fake = FakeSource(self.s)
+        got = self.read(fake)
+        self.assertEqual(got["source"], {"address": ADDRESS, "host": "mad.seriouscoder.one", "by": None, "oobi": None,
+                                         "introductions": 0, "catalogs": 0})
+        self.assertEqual(got["checked"], 26)
+        self.assertEqual(got["dropped"], {"entries": 0, "publications": 0})
+        self.assertEqual([p["name"] for p in got["publications"]], ["class-brick", "dropin-class", "member-class"])
+        for p in got["publications"]:
+            self.assertIsNone(p["problem"], p["name"])
+            self.assertTrue(p["roles"], p["name"])
+            self.assertEqual(set(p), {"target", "name", "description", "tags", "collection", "by", "title", "roles",
+                                      "problem"})
+        dropin = self.by_target(got)[DROPIN_CLASS]
+        self.assertEqual(dropin["title"], "Drop-in takes a class")
+        self.assertEqual(dropin["roles"], self.s.roles_of_selection(_definitions(), DROPIN_CLASS)["roles"])
+        self.assertEqual(got["definitions"], {said: fake.files[said].decode("utf-8")
+                                              for said in _fixture_serves(self.s)})
+
+    def test_each_definition_fetched_once_at_its_address_within_the_request_limit(self):
+        fake = FakeSource(self.s)
+        self.read(fake)
+        self.assertEqual(fake.calls[0][0], ADDRESS)
+        urls = fake.definition_calls()
+        self.assertEqual(len(urls), 26)
+        self.assertEqual(len(set(urls)), 26)
+        self.assertEqual(set(urls), {self.s.definition_address(BASE, said) for said in _fixture_serves(self.s)})
+        for _, timeout_ms in fake.calls:
+            self.assertTrue(0 < timeout_ms <= 10_000, timeout_ms)
+
+    def test_altered_definition_marks_only_the_publications_using_it(self):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        files[PAID_ADMISSION] = files[PAID_ADMISSION].replace(b"paid-admission", b"paid-admissiom", 1)
+        got = self.by_target(self.read(FakeSource(self.s, files=files)))
+        self.assertEqual((got[DROPIN_CLASS]["problem"], got[DROPIN_CLASS]["roles"]), ("mismatch", []))
+        for target in (CLASS_BRICK, MEMBER_CLASS):
+            self.assertIsNone(got[target]["problem"])
+            self.assertTrue(got[target]["roles"])
+
+    def test_altered_definition_is_not_counted_or_returned(self):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        files[CLASS_ATTENDED] = files[CLASS_ATTENDED] + b" "
+        got = self.read(FakeSource(self.s, files=files))
+        self.assertEqual(got["checked"], 25)
+        self.assertNotIn(CLASS_ATTENDED, got["definitions"])
+        self.assertEqual([(p["problem"], p["roles"]) for p in got["publications"]], [("mismatch", [])] * 3)
+
+    def test_unavailable_definition_is_a_mismatch_not_a_failed_read(self):
+        fake = FakeSource(self.s, fail={PAID_ADMISSION})
+        got = self.by_target(self.read(fake))
+        self.assertEqual((got[DROPIN_CLASS]["problem"], got[DROPIN_CLASS]["roles"]), ("mismatch", []))
+        self.assertIsNone(got[CLASS_BRICK]["problem"])
+        self.assertIsNone(got[MEMBER_CLASS]["problem"])
+        self.assertEqual(fake.definition_calls().count(self.s.definition_address(BASE, PAID_ADMISSION)), 1)
+
+    def test_definition_that_is_not_json_is_a_mismatch(self):
+        # Bytes that pass the SAID check but are not JSON: the target SAID inside non-JSON text.
+        raw = b"not json " + b"#" * 44
+        said = self.s.encode_said(digest(raw))
+        raw = raw.replace(b"#" * 44, said.encode())
+        document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
+        got = self.read(FakeSource(self.s, document=document, files={said: raw}))
+        self.assertEqual(got["publications"][0]["problem"], "mismatch")
+        self.assertEqual(got["checked"], 0)
+
+    def test_publication_whose_target_is_not_served_is_a_mismatch(self):
+        document = _doc(serves=[], publications=[_publication(target=SAID_A)])
+        fake = FakeSource(self.s, document=document, files={})
+        got = self.read(fake)
+        self.assertEqual((got["publications"][0]["problem"], got["publications"][0]["roles"]), ("mismatch", []))
+        self.assertEqual(fake.definition_calls(), [])
+
+    def test_limit_cuts_the_read_and_fetches_nothing_beyond_it(self):
+        fake = FakeSource(self.s)
+        got = self.by_target(self.read(fake, definitions_per_read=12))
+        self.assertEqual(len(fake.definition_calls()), 12)
+        self.assertIsNone(got[CLASS_BRICK]["problem"])  # its closure is exactly 12 definitions
+        self.assertTrue(got[CLASS_BRICK]["roles"])
+        for target in (DROPIN_CLASS, MEMBER_CLASS):
+            self.assertEqual((got[target]["problem"], got[target]["roles"]), ("limit", []))
+
+    def test_default_limit_is_fifty_definitions(self):
+        files = {}
+        for i in range(60):
+            raw = b'{"d":"' + b"#" * 44 + b'","n":' + str(i).encode() + b"}"
+            real = self.s.encode_said(digest(raw))
+            files[real] = raw.replace(b"#" * 44, real.encode())
+        real_saids = list(files)
+        serves = [{"said": real_saids[0], "refers": real_saids[1:]}] + [{"said": said} for said in real_saids[1:]]
+        document = _doc(serves=serves, publications=[_publication(target=real_saids[0])])
+        fake = FakeSource(self.s, document=document, files=files)
+        got = self.read(fake)
+        self.assertEqual(len(fake.definition_calls()), 50)
+        self.assertEqual(got["checked"], 50)
+        self.assertEqual(got["publications"][0]["problem"], "limit")
+
+    def test_read_stops_when_the_clock_passes_sixty_seconds(self):
+        clock = Clock()
+        fake = FakeSource(self.s, clock=clock, ms_per_fetch=5_000)
+        with self.assertRaises(self.s.SourceFault) as raised:
+            self.read(fake, clock=clock)
+        self.assertEqual(raised.exception.code, "UNREACHABLE")
+        self.assertEqual(raised.exception.message, "Could not reach mad.seriouscoder.one.")
+        self.assertEqual(len(fake.calls), 12)  # the 12th fetch ends at 60 s; the read stops before a 13th
+
+    def test_request_timeout_never_outlasts_the_read(self):
+        clock = Clock()
+        fake = FakeSource(self.s, clock=clock, ms_per_fetch=2_000)
+        self.read(fake, clock=clock)
+        # 26 fetches of 2 s each have used 52 s when the 27th starts: 8 s of the read are left.
+        self.assertEqual([t for _, t in fake.calls], [10_000] * 26 + [8_000])
+
+    def test_invalid_source_document_is_bad_source(self):
+        fake = FakeSource(self.s, document=b"[]")
+        with self.assertRaises(self.s.SourceFault) as raised:
+            self.read(fake)
+        self.assertEqual(raised.exception.code, "BAD_SOURCE")
+        self.assertEqual(raised.exception.message, "mad.seriouscoder.one did not return a valid source.")
+        self.assertEqual(fake.definition_calls(), [])
+
+    def test_fault_fetching_the_document_stops_the_read(self):
+        calls = []
+
+        async def refuse(url, timeout_ms):
+            calls.append(url)
+            raise self.s.SourceFault("NOT_READABLE", "mad.seriouscoder.one does not allow wallets to read it yet.")
+        with self.assertRaises(self.s.SourceFault) as raised:
+            asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=refuse, digest=digest, clock=Clock()))
+        self.assertEqual(raised.exception.code, "NOT_READABLE")
+        self.assertEqual(calls, [ADDRESS])
+
+    def test_bad_address_fetches_nothing(self):
+        fake = FakeSource(self.s)
+        with self.assertRaises(self.s.SourceFault) as raised:
+            self.read(fake, text="http://x")
+        self.assertEqual(raised.exception.code, "BAD_ADDRESS")
+        self.assertEqual(fake.calls, [])
+
+    def test_publication_by_carried_through(self):
+        document = json.loads((FIXTURES / "source.json").read_bytes())
+        document["publications"][0]["by"] = "Eabc_-1"
+        got = self.read(FakeSource(self.s, document=json.dumps(document).encode()))
+        self.assertEqual([p["by"] for p in got["publications"]], ["Eabc_-1", None, None])
 
 
 if __name__ == "__main__":

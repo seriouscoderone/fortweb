@@ -1,7 +1,8 @@
-"""Reading a mad-discovery source: the address and SAID rules.
+"""Reading a mad-discovery source: address and SAID rules, source document rules, role derivation, and the read.
 
-The rules are mad-discovery's (src/address.ts, src/said.ts). Keep them identical:
-python/test_sourcing.py runs mad-discovery's own fixtures against this module.
+The rules are mad-discovery's (src/address.ts, src/said.ts, src/document.ts, src/source.ts, src/limits.ts). Keep
+them identical: python/test_sourcing.py runs mad-discovery's own fixtures against this module. `read_source` puts
+them together; the network, the digest and the clock are passed in, so this module imports no `js` and opens nothing.
 """
 
 from __future__ import annotations
@@ -331,3 +332,73 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
             "outcome": ref(outcome_said) if is_said(outcome_said) else None,
         })
     return {"title": title, "roles": [{"role": name, "responsibilities": roles[name]} for name in sorted(roles)]}
+
+
+# Reading a source: the document, then the definitions its publications need, each checked against its SAID.
+
+def _definition(raw: bytes, said: str, digest):
+    """The served text and parsed object of a definition that passes its SAID check; None otherwise."""
+    if not check_said(raw, said, digest=digest):
+        return None
+    try:
+        return raw.decode("utf-8"), _parse_bounded(raw)
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+
+async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_read: int = DEFINITIONS_PER_READ) -> dict:
+    """Read the source at `text` and the definitions its publications need.
+
+    `fetch_bytes(url, timeout_ms)` is awaited and returns the bytes or raises SourceFault; `digest(bytes)` is
+    Blake3-256; `clock()` gives milliseconds. A fault on the address or the source document stops the read, and so
+    does running out of time (UNREACHABLE). A definition that cannot be fetched, fails its SAID check or is not JSON
+    does not stop the read: every publication whose closure holds it gets problem "mismatch". Once
+    `definitions_per_read` definitions have been fetched nothing more is fetched, and a publication that still needs
+    one gets problem "limit" (unless one of its definitions already failed, which is "mismatch"). Each definition is
+    fetched at most once. A publication with a problem has no roles.
+    """
+    where = normalize_address(text)
+    host = where["host"]
+    started = clock()
+
+    def time_left() -> int:
+        left = READ_MS - (clock() - started)
+        if left <= 0:
+            raise SourceFault("UNREACHABLE", f"Could not reach {host}.")
+        return int(min(REQUEST_MS, left))
+
+    raw = await fetch_bytes(where["address"], time_left())
+    time_left()
+    read = read_source_document(raw, where["address"])
+    document = read["document"]
+    serves = document["serves"]
+
+    fetched: dict[str, tuple[str, object] | None] = {}  # said -> (text, parsed), or None when it failed
+    publications = []
+    for publication in document["publications"]:
+        needed = closure(serves, publication["target"])
+        cut = False
+        for said in needed:
+            if said in fetched:
+                continue
+            if len(fetched) >= definitions_per_read:
+                cut = True
+                break
+            try:
+                served = await fetch_bytes(definition_address(where["base"], said), time_left())
+            except SourceFault:
+                served = None
+            time_left()
+            fetched[said] = None if served is None else _definition(served, said, digest)
+        failed = any(said in fetched and fetched[said] is None for said in needed)
+        problem = "mismatch" if not needed or failed else "limit" if cut else None
+        verified = {said: fetched[said][1] for said in needed if fetched.get(said) is not None}
+        selection = roles_of_selection(verified, publication["target"])
+        publications.append(dict(publication, title=selection["title"],
+                                 roles=selection["roles"] if problem is None else [], problem=problem))
+
+    definitions = {said: got[0] for said, got in fetched.items() if got is not None}
+    source = {"address": document["source"], "host": host, "by": document["by"], "oobi": document["oobi"],
+              "introductions": document["introductions"], "catalogs": document["catalogs"]}
+    return {"source": source, "checked": len(definitions), "dropped": read["dropped"],
+            "publications": publications, "definitions": definitions}
