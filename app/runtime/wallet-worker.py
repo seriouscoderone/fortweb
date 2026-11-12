@@ -370,6 +370,7 @@ onboarding.configure_runtime(
     witness_registration_timeout_ms=KF_WITNESS_REGISTRATION_TIMEOUT_MS,
     cesr_timeout_ms=KF_CESR_TIMEOUT_MS,
 )
+roling.configure_runtime(emit_diagnostic=emit_runtime_diagnostic)
 
 
 async def _dispatch(method: str, params: dict):

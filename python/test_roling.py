@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
+import json
 import sys
 import types
 import unittest
+import warnings
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -30,21 +33,42 @@ def _load(name: str, path: Path):
     return module
 
 
-def _load_roling():
-    keys = ("js", "vaulting", "sourcing")
-    original = {key: sys.modules.get(key) for key in keys}
-    sourcing = _load("sourcing", RUNTIME / "sourcing.py")
-    sys.modules["js"] = types.SimpleNamespace(performance=types.SimpleNamespace(now=lambda: 0.0))
-    sys.modules["vaulting"] = types.SimpleNamespace(RuntimeFault=RuntimeFault)
-    sys.modules["sourcing"] = sourcing
+@contextlib.contextmanager
+def _stand_ins(modules: dict):
+    """Puts `modules` in sys.modules while a runtime module is loaded, then puts back what was there."""
+    original = {key: sys.modules.get(key) for key in modules}
+    sys.modules.update(modules)
     try:
-        return _load("fortweb_roling_test", RUNTIME / "roling.py"), sourcing
+        yield
     finally:
         for key, value in original.items():
             if value is None:
                 sys.modules.pop(key, None)
             else:
                 sys.modules[key] = value
+
+
+def _load_roling():
+    sourcing = _load("sourcing", RUNTIME / "sourcing.py")
+    with _stand_ins({"js": types.SimpleNamespace(performance=types.SimpleNamespace(now=lambda: 0.0)),
+                     "vaulting": types.SimpleNamespace(RuntimeFault=RuntimeFault), "sourcing": sourcing}):
+        return _load("fortweb_roling_test", RUNTIME / "roling.py"), sourcing
+
+
+def _load_worker(roling, posted: list):
+    """wallet-worker.py, loaded as the worker loads it, around this `roling`. What it posts to the page is appended
+    to `posted`. Its other modules are stand-ins that take their settings and do nothing."""
+    stand_in = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
+                                     BrowserClienter=object)
+    modules = {
+        "js": types.SimpleNamespace(self=types.SimpleNamespace(postMessage=posted.append)),
+        "polyscript": types.SimpleNamespace(config=types.SimpleNamespace(to_py=dict)),
+        "onboarding": stand_in, "transporting": stand_in, "vaulting": stand_in,
+        "runtime_packages": types.SimpleNamespace(),
+        "roling": roling,
+    }
+    with _stand_ins(modules), warnings.catch_warnings():  # the worker sets warning filters of its own
+        return _load("fortweb_wallet_worker_test", RUNTIME / "wallet-worker.py")
 
 
 class SourcesReadTest(unittest.IsolatedAsyncioTestCase):
@@ -585,6 +609,23 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(js.calls)
         self.assertTrue(all(at < 50_000 + 60_000 for _, _, at in js.calls), [at for _, _, at in js.calls])
         self.assertEqual(sum(1 for _, options, _ in js.calls if options.mode == "cors"), 15)
+
+
+class WorkerDiagnosticTest(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_gives_roling_its_emitter_so_the_report_reaches_the_page(self):
+        roling, sourcing = _load_roling()
+        posted = []
+        _load_worker(roling, posted)
+
+        async def answer(url, options):
+            return types.SimpleNamespace(status=200, headers=None, body=None)  # .get on None: AttributeError
+        roling.js = StubJs(answer)
+        with self.assertRaises(sourcing.SourceFault):
+            await roling._fetch_bytes(URL, 10_000)
+        # The message the page's bridge takes for a worker diagnostic and passes on to the log.
+        self.assertEqual([json.loads(message) for message in posted], [{
+            "kind": "fortweb.runtime.diagnostic", "event": "source_fetch_unexpected_error", "level": "warning",
+            "exception": "AttributeError", "host": "mad.example.test"}])
 
 
 if __name__ == "__main__":
