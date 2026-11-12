@@ -324,5 +324,100 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(self.s.closure(serves, SAID_B), [SAID_A, SAID_B, SAID_C])
 
 
+def _definitions() -> dict:
+    return {f.stem: json.loads(f.read_bytes()) for f in (FIXTURES / "compact").glob("*.json")}
+
+
+class RolesTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+        self.defs = _definitions()
+
+    def role(self, roles: dict, name: str) -> dict:
+        return next(r for r in roles["roles"] if r["role"] == name)
+
+    def test_dropin_class_roles_sorted(self):
+        got = self.s.roles_of_selection(self.defs, DROPIN_CLASS)
+        self.assertEqual([r["role"] for r in got["roles"]], ["cashier", "front-desk", "instructor", "patron", "recorder"])
+
+    def test_dropin_class_title(self):
+        self.assertEqual(self.s.roles_of_selection(self.defs, DROPIN_CLASS)["title"], "Drop-in takes a class")
+
+    def test_title_falls_back_to_alias(self):
+        selection = {"kind": "selection", "alias": "class-brick", "name": 5, "rrs": []}
+        self.assertEqual(self.s.roles_of_selection({SAID_A: selection}, SAID_A)["title"], "class-brick")
+        del selection["alias"]
+        self.assertEqual(self.s.roles_of_selection({SAID_A: selection}, SAID_A)["title"], "")
+
+    def test_instructor_class_attended(self):
+        instructor = self.role(self.s.roles_of_selection(self.defs, DROPIN_CLASS), "instructor")
+        self.assertEqual(instructor["responsibilities"], [{
+            "said": "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz",
+            "alias": "class-attended",
+            "reliesOn": [
+                {"said": "EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-", "alias": "enrollment", "kind": "authorization", "as": "seat"},
+                {"said": "EJd1iQ-VgrOUblb-gE6m4jYNC3Iua5t8nJS9KK6yph69", "alias": "attended", "kind": "fact", "as": "visit"},
+            ],
+            "attests": [{"said": "EHC_ESsWWD0Y2UKuPcdAfd8LzZ1hPSA2Z9afFtFsOpjC", "alias": "class-attended", "kind": "fact"}],
+            "outcome": {"said": "EHC_ESsWWD0Y2UKuPcdAfd8LzZ1hPSA2Z9afFtFsOpjC", "alias": "class-attended", "kind": "fact"},
+        }])
+
+    def test_cashier_responsibilities_in_rrs_order(self):
+        cashier = self.role(self.s.roles_of_selection(self.defs, DROPIN_CLASS), "cashier")
+        self.assertEqual([r["alias"] for r in cashier["responsibilities"]], ["payment-received", "paid-admission"])
+
+    def test_target_not_a_selection(self):
+        empty = {"title": "", "roles": []}
+        self.assertEqual(self.s.roles_of_selection(self.defs, "EO6exNffu9clQv9czAMDzj9W_CNW3W47yAJhMqYC05Qz"), empty)
+        self.assertEqual(self.s.roles_of_selection(self.defs, SAID_A), empty)
+        self.assertEqual(self.s.roles_of_selection({SAID_A: {"kind": "selection", "name": "x", "rrs": "no"}}, SAID_A), empty)
+        self.assertEqual(self.s.roles_of_selection({SAID_A: ["selection"]}, SAID_A), empty)
+
+    def test_missing_definition_gets_empty_alias_and_kind(self):
+        defs = {
+            SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B]},
+            SAID_B: {"kind": "rr", "alias": "r", "role": "clerk", "outcome": {"kind": "fact", "said": SAID_C},
+                     "rely_on": [{"said": SAID_C, "as": "x"}], "attest": [SAID_C]},
+        }
+        got = self.s.roles_of_selection(defs, SAID_A)
+        ref = {"said": SAID_C, "alias": "", "kind": ""}
+        self.assertEqual(got["roles"], [{"role": "clerk", "responsibilities": [{
+            "said": SAID_B, "alias": "r", "reliesOn": [dict(ref, **{"as": "x"})], "attests": [ref], "outcome": ref}]}])
+
+    def test_rr_with_non_string_role_skipped(self):
+        defs = {
+            SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B, SAID_C, "junk", 7]},
+            SAID_B: {"kind": "rr", "alias": "r", "role": ["clerk"]},
+            SAID_C: {"kind": "rr", "alias": "q", "role": "clerk"},
+        }
+        got = self.s.roles_of_selection(defs, SAID_A)
+        self.assertEqual(got["roles"], [{"role": "clerk", "responsibilities": [
+            {"said": SAID_C, "alias": "q", "reliesOn": [], "attests": [], "outcome": None}]}])
+
+    def test_malformed_members_ignored(self):
+        defs = {
+            SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B]},
+            SAID_B: {"kind": "rr", "alias": 9, "role": "clerk", "outcome": {"said": "nope"},
+                     "rely_on": ["x", {"said": "nope", "as": "y"}, {"as": "z"}, {"said": SAID_C, "as": 3}, {"said": SAID_C, "as": "ok"}],
+                     "attest": [SAID_C, "nope", {"said": SAID_C}]},
+            SAID_C: {"kind": "fact", "alias": "c"},
+        }
+        got = self.s.roles_of_selection(defs, SAID_A)
+        self.assertEqual(got["roles"][0]["responsibilities"], [{
+            "said": SAID_B, "alias": "",
+            "reliesOn": [{"said": SAID_C, "alias": "c", "kind": "fact", "as": "ok"}],
+            "attests": [{"said": SAID_C, "alias": "c", "kind": "fact"}],
+            "outcome": None}])
+
+    def test_wrong_typed_lists_ignored(self):
+        defs = {
+            SAID_A: {"kind": "selection", "name": "S", "rrs": [SAID_B]},
+            SAID_B: {"kind": "rr", "alias": "r", "role": "clerk", "outcome": SAID_C, "rely_on": {"said": SAID_C}, "attest": SAID_C},
+        }
+        got = self.s.roles_of_selection(defs, SAID_A)
+        self.assertEqual(got["roles"][0]["responsibilities"],
+                         [{"said": SAID_B, "alias": "r", "reliesOn": [], "attests": [], "outcome": None}])
+
+
 if __name__ == "__main__":
     unittest.main()

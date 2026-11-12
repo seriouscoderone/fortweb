@@ -273,3 +273,50 @@ def closure(serves: dict, target: str) -> list[str]:
                 seen.add(ref)
                 todo.append(ref)
     return sorted(seen)
+
+
+# Roles of a selection. The definition format is a prototype; its reading stays inside roles_of_selection.
+
+def roles_of_selection(definitions: dict, target: str) -> dict:
+    """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
+
+    Anything of the wrong shape is ignored. A referenced SAID with no definition gets alias "" and kind "".
+    """
+    def member(obj, name: str) -> str:
+        value = obj.get(name) if isinstance(obj, dict) else None
+        return value if isinstance(value, str) else ""
+
+    def ref(said: str) -> dict:
+        found = definitions.get(said)
+        return {"said": said, "alias": member(found, "alias"), "kind": member(found, "kind")}
+
+    def items(obj: dict, name: str) -> list:
+        value = obj.get(name)
+        return value if isinstance(value, list) else []
+
+    selection = definitions.get(target)
+    if not isinstance(selection, dict) or selection.get("kind") != "selection" or not isinstance(selection.get("rrs"), list):
+        return {"title": "", "roles": []}
+    title = member(selection, "name") or member(selection, "alias")
+
+    roles: dict[str, list[dict]] = {}
+    for said in selection["rrs"]:
+        rr = definitions.get(said) if is_said(said) else None
+        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not isinstance(rr.get("role"), str):
+            continue
+        relies_on = [
+            dict(ref(item["said"]), **{"as": item["as"]})
+            for item in items(rr, "rely_on")
+            if isinstance(item, dict) and is_said(item.get("said")) and isinstance(item.get("as"), str)
+        ]
+        attests = [ref(item) for item in items(rr, "attest") if is_said(item)]
+        outcome = rr.get("outcome")
+        outcome_said = outcome.get("said") if isinstance(outcome, dict) else None
+        roles.setdefault(rr["role"], []).append({
+            "said": said,
+            "alias": member(rr, "alias"),
+            "reliesOn": relies_on,
+            "attests": attests,
+            "outcome": ref(outcome_said) if is_said(outcome_said) else None,
+        })
+    return {"title": title, "roles": [{"role": name, "responsibilities": roles[name]} for name in sorted(roles)]}
