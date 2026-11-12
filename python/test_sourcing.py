@@ -644,6 +644,64 @@ class ReadSourceTest(unittest.TestCase):
         self.assertEqual(got["checked"], 50)
         self.assertEqual(got["publications"][0]["problem"], "limit")
 
+    def big_definitions(self, count: int, size: int) -> dict:
+        """`count` definitions of `size` bytes each that pass their SAID check, in insertion order."""
+        files = {}
+        for i in range(count):
+            head = b'{"d":"' + b"#" * 44 + b'","n":' + str(i).encode() + b',"pad":"'
+            raw = head + b"x" * (size - len(head) - 2) + b'"}'
+            said = self.s.encode_said(digest(raw))
+            files[said] = raw.replace(b"#" * 44, said.encode())
+            self.assertEqual(len(files[said]), size)
+        return files
+
+    def test_read_byte_budget_is_four_million(self):
+        self.assertEqual(self.s.READ_BYTES, 4_000_000)
+
+    def test_byte_budget_stops_fetching_and_marks_cut_publications_limit(self):
+        files = self.big_definitions(6, 900_000)
+        saids = list(files)
+        document = _doc(serves=[{"said": said} for said in saids],
+                        publications=[_publication(target=said) for said in saids])
+        fake = FakeSource(self.s, document=document, files=files)
+        got = self.read(fake)
+        # 4 x 900,000 bytes plus the document is under 4,000,000: the fifth is fetched; after it the budget is spent.
+        self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids[:5]])
+        self.assertEqual([p["problem"] for p in got["publications"]], [None] * 5 + ["limit"])
+        self.assertEqual(got["checked"], 5)
+
+    def test_byte_budget_counts_the_source_document(self):
+        files = self.big_definitions(5, 800_000)
+        saids = list(files)
+        document = _doc(serves=[{"said": said} for said in saids],
+                        publications=[_publication(target=said) for said in saids], pad="x" * 950_000)
+        fake = FakeSource(self.s, document=document, files=files)
+        got = self.read(fake)
+        # 950,000 + 4 x 800,000 spends the budget, so the fifth definition is never requested.
+        self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids[:4]])
+        self.assertEqual(got["publications"][4]["problem"], "limit")
+
+    def test_mismatch_wins_over_the_byte_budget(self):
+        files = self.big_definitions(7, 900_000)
+        saids = list(files)
+        failing, cut = saids[0], saids[6]  # a failed fetch receives no bytes; saids[1:6] spend the budget
+        document = _doc(
+            serves=[{"said": said} for said in saids[:6]] + [{"said": cut, "refers": [failing]}],
+            publications=[_publication(target=said) for said in saids[:6]] + [_publication(target=cut)])
+        fake = FakeSource(self.s, document=document, files=files, fail={failing})
+        got = self.read(fake)
+        self.assertNotIn(self.s.definition_address(BASE, cut), fake.definition_calls())
+        # The last publication needs the failed definition and one cut by the budget: mismatch wins.
+        self.assertEqual(got["publications"][6]["problem"], "mismatch")
+        self.assertEqual(got["publications"][0]["problem"], "mismatch")
+
+    def test_roles_of_every_fixture_publication_match_role_derivation(self):
+        got = self.read(FakeSource(self.s))
+        definitions = _definitions()
+        for p in got["publications"]:
+            expected = self.s.roles_of_selection(definitions, p["target"])
+            self.assertEqual((p["title"], p["roles"]), (expected["title"], expected["roles"]), p["name"])
+
     def test_read_stops_when_the_clock_passes_sixty_seconds(self):
         clock = Clock()
         fake = FakeSource(self.s, clock=clock, ms_per_fetch=5_000)

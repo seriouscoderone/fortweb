@@ -18,6 +18,7 @@ FILE_BYTES = 1_000_000
 REQUEST_MS = 10_000
 READ_MS = 60_000
 DEFINITIONS_PER_READ = 50
+READ_BYTES = 4_000_000  # source document and definitions together, as received, in one read
 MAX_ADDRESS = 512
 JSON_DEPTH = 64
 _IPV4 = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
@@ -336,26 +337,42 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
 
 # Reading a source: the document, then the definitions its publications need, each checked against its SAID.
 
-def _definition(raw: bytes, said: str, digest):
-    """The served text and parsed object of a definition that passes its SAID check; None otherwise."""
+def _definition(raw: bytes, said: str, digest) -> str | None:
+    """The served text of a definition that passes its SAID check and is bounded JSON; None otherwise.
+
+    The parsed object is not kept: a read holds only texts, and parses one publication's definitions while deriving
+    its roles.
+    """
     if not check_said(raw, said, digest=digest):
         return None
     try:
-        return raw.decode("utf-8"), _parse_bounded(raw)
+        _parse_bounded(raw)
+        return raw.decode("utf-8")
     except (UnicodeDecodeError, ValueError):
         return None
 
 
-async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_read: int = DEFINITIONS_PER_READ) -> dict:
+def _roles(texts: dict, needed: list[str], target: str, *, whole: bool) -> dict:
+    """roles_of_selection over the checked definitions of one closure, parsed for this call only.
+
+    With `whole` false only the target is parsed (enough for the title of a publication that gets no roles).
+    """
+    saids = needed if whole else [target]
+    return roles_of_selection({said: json.loads(texts[said]) for said in saids if texts.get(said) is not None}, target)
+
+
+async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_read: int = DEFINITIONS_PER_READ,
+                      read_bytes: int = READ_BYTES) -> dict:
     """Read the source at `text` and the definitions its publications need.
 
     `fetch_bytes(url, timeout_ms)` is awaited and returns the bytes or raises SourceFault; `digest(bytes)` is
     Blake3-256; `clock()` gives milliseconds. A fault on the address or the source document stops the read, and so
-    does running out of time (UNREACHABLE). A definition that cannot be fetched, fails its SAID check or is not JSON
-    does not stop the read: every publication whose closure holds it gets problem "mismatch". Once
-    `definitions_per_read` definitions have been fetched nothing more is fetched, and a publication that still needs
-    one gets problem "limit" (unless one of its definitions already failed, which is "mismatch"). Each definition is
-    fetched at most once. A publication with a problem has no roles.
+    does running out of time (UNREACHABLE); the clock is checked before and after every fetch. A definition that
+    cannot be fetched, fails its SAID check or is not JSON does not stop the read: every publication whose closure
+    holds it gets problem "mismatch". Once `definitions_per_read` definitions have been fetched, or the bytes received
+    in this read (source document and definitions) reach `read_bytes`, nothing more is fetched, and a publication
+    that still needs one gets problem "limit" (unless one of its definitions already failed, which is "mismatch").
+    Each definition is fetched at most once. A publication with a problem has no roles.
     """
     where = normalize_address(text)
     host = where["host"]
@@ -369,11 +386,13 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
 
     raw = await fetch_bytes(where["address"], time_left())
     time_left()
+    received = len(raw)
     read = read_source_document(raw, where["address"])
+    del raw
     document = read["document"]
     serves = document["serves"]
 
-    fetched: dict[str, tuple[str, object] | None] = {}  # said -> (text, parsed), or None when it failed
+    fetched: dict[str, str | None] = {}  # said -> checked text, or None when it failed
     publications = []
     for publication in document["publications"]:
         needed = closure(serves, publication["target"])
@@ -381,7 +400,7 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
         for said in needed:
             if said in fetched:
                 continue
-            if len(fetched) >= definitions_per_read:
+            if len(fetched) >= definitions_per_read or received >= read_bytes:
                 cut = True
                 break
             try:
@@ -389,15 +408,17 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
             except SourceFault:
                 served = None
             time_left()
+            if served is not None:
+                received += len(served)
             fetched[said] = None if served is None else _definition(served, said, digest)
+            del served
         failed = any(said in fetched and fetched[said] is None for said in needed)
         problem = "mismatch" if not needed or failed else "limit" if cut else None
-        verified = {said: fetched[said][1] for said in needed if fetched.get(said) is not None}
-        selection = roles_of_selection(verified, publication["target"])
+        selection = _roles(fetched, needed, publication["target"], whole=problem is None)
         publications.append(dict(publication, title=selection["title"],
                                  roles=selection["roles"] if problem is None else [], problem=problem))
 
-    definitions = {said: got[0] for said, got in fetched.items() if got is not None}
+    definitions = {said: got for said, got in fetched.items() if got is not None}
     source = {"address": document["source"], "host": host, "by": document["by"], "oobi": document["oobi"],
               "introductions": document["introductions"], "catalogs": document["catalogs"]}
     return {"source": source, "checked": len(definitions), "dropped": read["dropped"],
