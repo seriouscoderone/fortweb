@@ -205,6 +205,11 @@ def _parse_bounded(raw: bytes):
     return parsed
 
 
+def parse_definition(text: str):
+    """A definition's text, as the wallet keeps it, parsed under the rules it was read with; ValueError otherwise."""
+    return _parse_bounded(text.encode("utf-8"))
+
+
 def _units(text: str) -> int:
     """A string's length as JavaScript counts it, in UTF-16 code units."""
     return len(text.encode("utf-16-le", "surrogatepass")) // 2

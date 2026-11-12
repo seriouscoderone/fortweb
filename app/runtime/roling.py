@@ -10,7 +10,6 @@ taking on a role uses the last read. The worker gives this module its diagnostic
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from inspect import isawaitable
@@ -315,8 +314,13 @@ def _role_view(hby, record: RoleRecord) -> dict:
     definitions = {}
     for said in record.definitions:
         found = stored.get(keys=(said,))
-        if found is not None:
-            definitions[said] = json.loads(found.text)
+        if found is None:
+            continue
+        try:
+            definitions[said] = sourcing.parse_definition(found.text)
+        except ValueError:
+            # Treated as missing: the role is still listed, with what can be derived without it.
+            _diagnose("role_definition_unreadable", level="warning", said=said)
     selection = sourcing.roles_of_selection(definitions, record.target)
     role = next((item for item in selection["roles"] if item["role"] == record.role), None)
     hab = hby.habByPre(record.aid)

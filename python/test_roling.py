@@ -649,6 +649,20 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(role["warnings"], [{"code": "NOT_APPOINTED", "message": "Not appointed yet"}])
         self.assertEqual(self.vault.reloads, 2)  # listing writes nothing
 
+    async def test_a_stored_definition_that_cannot_be_parsed_is_treated_as_missing(self):
+        taken = (await self.take_on("cashier"))["role"]
+        self.assertTrue(taken["responsibilities"])
+        definitions = self.stored("fdef.")
+        for text in ("{not json", '{"kind": "selection", "rrs": [], "x": NaN}'):
+            with self.subTest(text=text):
+                self.diagnostics.clear()
+                definitions[(DROPIN,)] = json.dumps({"said": DROPIN, "text": text}).encode()
+                listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
+                # Still listed, with what can be derived without the selection: no responsibilities.
+                self.assertEqual([(role["id"], role["responsibilities"]) for role in listed], [(taken["id"], [])])
+                self.assertEqual(self.diagnostics, [("role_definition_unreadable",
+                                                     {"level": "warning", "said": DROPIN})])
+
     async def test_list_of_a_vault_with_no_roles_is_empty(self):
         self.assertEqual(await self.roling.dispatch("roles.list", {"vaultId": VAULT}), {"roles": []})
 
