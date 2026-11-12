@@ -381,19 +381,27 @@ roling.configure_runtime(
 )
 
 
-# Methods that change which vault is open (or close it). The engine's last read belongs to the vault it was made in,
-# so it is forgotten before any of these runs; a persist and reload inside one method keeps it.
-_VAULT_CHANGING_METHODS = frozenset({"vaults.open", "vaults.create", "vaults.close"})
-
-
 async def _dispatch(method: str, params: dict):
-    if method in _VAULT_CHANGING_METHODS:
-        roling.forget_last_read()
     if method.startswith("kf."):
         return await onboarding.dispatch(method, params)
     if method.startswith(("sources.", "roles.")):
         return await roling.dispatch(method, params)
     return await vaulting.dispatch(method, params)
+
+
+async def _dispatch_locked(method: str, params: dict):
+    """A request that holds the request lock: only such a request can change which vault is open.
+
+    The engine's last read belongs to the vault it was made in. When another vault, or none, is open after the
+    request than before it (another was opened, this one was closed, or an open failed after this one was closed),
+    the read is forgotten before the lock is released, whatever the method was and however it ended. A request that
+    leaves the same vault open keeps the read: one that is refused, a new vault, a persist and reload."""
+    opened = vaulting.open_vault_id()
+    try:
+        return await _dispatch(method, params)
+    finally:
+        if vaulting.open_vault_id() != opened:
+            roling.forget_last_read()
 
 
 def _error_payload(message_id: str, code: str, message: str):
@@ -458,7 +466,7 @@ async def handle_request(raw_message):
             result = await _dispatch(method, params)
         else:
             async with _REQUEST_LOCK:
-                result = await _dispatch(method, params)
+                result = await _dispatch_locked(method, params)
         return json.dumps(
             {
                 "id": message_id,

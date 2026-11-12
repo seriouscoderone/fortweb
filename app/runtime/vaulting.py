@@ -425,6 +425,11 @@ def require_open_state(vault_id: str | None = None):
     return _STATE
 
 
+def open_vault_id():
+    """The id of the vault that is open, or None when no vault is open."""
+    return None if _STATE is None else _STATE["vault"]["id"]
+
+
 async def close_state(*, clear: bool = False):
     global _STATE
     if _STATE is None:

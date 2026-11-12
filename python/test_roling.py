@@ -1158,18 +1158,97 @@ class WorkerDiagnosticTest(unittest.IsolatedAsyncioTestCase):
             "exception": "AttributeError", "host": "mad.example.test"}])
 
 
+SIDE = "side"  # the registry's second vault; its passcode is "side-pass"
+
+
+class AuthError(Exception):
+    """keri.kering.AuthError, which a vault opened with the wrong passcode raises."""
+
+
+class RegistryDb:
+    """The database of the vault registry as vaulting uses it, in memory."""
+
+    def getVal(self, store, key):
+        return store.items.get(key)
+
+    def setVal(self, store, key, value):
+        store.items[key] = value
+
+    async def flush(self):
+        pass
+
+
+class Vaults:
+    """The runtime's own vaulting.py, for the worker and for roling, over stand-ins for where it keeps vaults.
+
+    Listing, making, opening and closing a vault, and the persist and reload, are vaulting's own code, so the open
+    vault changes exactly as it does in the runtime: an open closes the open vault first and only then opens the
+    other. The stand-ins are below that. The registry is in memory and holds "My Wallet" (my-wallet, no passcode)
+    and "Side" (side, passcode "side-pass"). The state of a vault is a FakeHby over what the vault holds, with
+    FakeKomer for its stores, and a passcode is its own key. Where the runtime waits for storage a stand-in gives up
+    one turn of the loop, and a test can hold a method there: with `hold` set to "registry", "close" (a vault is
+    being closed) or "build" (a vault is being opened), `held` is set when that step is reached and the step goes on
+    once `go_on` is set. `built` lists the vaults whose state was built: opened, reloaded, or set up when made."""
+
+    def __init__(self):
+        self.vaulting = vaulting = _load("fortweb_vaulting_for_worker_test", RUNTIME / "vaulting.py")
+        self.hold, self.held, self.go_on = None, asyncio.Event(), asyncio.Event()
+        self.built = []
+        passcodes = {VAULT: "", SIDE: "side-pass"}
+        kept = {}  # vault id -> what the vault holds: (its FakeDb, its identifiers)
+        salt = "0AAwMTIzNDU2Nzg5YWJjZGVm"
+        store = types.SimpleNamespace(items={
+            vault_id.encode(): json.dumps({"id": vault_id, "alias": alias, "encrypted": bool(passcodes[vault_id]),
+                                           "createdAt": "2026-11-12T09:00:00+00:00", "rootSalt": salt}).encode()
+            for vault_id, alias in ((VAULT, "My Wallet"), (SIDE, "Side"))})
+        registry = {"db": RegistryDb(), "store": store}
+        modules = {
+            "koming": types.SimpleNamespace(Komer=FakeKomer),
+            "kering": types.SimpleNamespace(AuthError=AuthError),
+            "signing": types.SimpleNamespace(Salter=lambda: types.SimpleNamespace(qb64=salt)),
+            "organizing": types.SimpleNamespace(Organizer=lambda hby: None),
+        }
+
+        async def ensure_registry():
+            await self._storage("registry")
+            return registry
+
+        async def build_vault_state(record, *, bran=""):
+            await self._storage("build")
+            if bran != passcodes.setdefault(record["id"], bran):
+                raise AuthError()
+            self.built.append(record["id"])
+            data, habs = kept.setdefault(record["id"], (FakeDb(), {}))
+            return {"modules": modules, "vault": record, "hby": FakeHby(data, habs), "bran": bran,
+                    "kfSurfaceKeyState": {}}
+
+        async def close_habery(hby, *, clear=False):
+            await self._storage("close")
+            hby.closed = hby.db.closed = True
+
+        vaulting.RuntimeFault = RuntimeFault  # one fault class for the worker, roling and vaulting, as in the runtime
+        vaulting.ensure_registry = ensure_registry
+        vaulting.load_modules = lambda: modules
+        vaulting._prepare_bran = lambda passcode, passcode_kdf=None: str(passcode or "").strip()
+        vaulting._build_vault_state = build_vault_state
+        vaulting.close_habery = close_habery
+        # What a vault or an identifier looks like to the page is not the subject here.
+        vaulting._vault_summary = lambda state: {"vault": {"id": state["vault"]["id"], "opened": True}}
+        vaulting._identifier_record = lambda hab: {"aid": hab.pre, "alias": hab.name}
+
+    async def _storage(self, step):
+        await asyncio.sleep(0)
+        if self.hold == step:
+            self.hold = None
+            self.held.set()
+            await self.go_on.wait()
+
+
 class WorkerRequests:
-    """The worker's handle_request around a `roling`, with its runtime ready and every vaults.* method answered by a
-    stand-in that records it. roles.* use the FakeVaulting given to roling."""
+    """The worker's handle_request around a `roling` and a `vaulting` (the module of a Vaults), with its runtime
+    ready."""
 
-    def __init__(self, roling):
-        self.vault_methods = []
-
-        async def vault_dispatch(method, params):
-            self.vault_methods.append(method)
-            return {}
-        vaulting = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
-                                         dispatch=vault_dispatch)
+    def __init__(self, roling, vaulting):
         self.worker = _load_worker(roling, [], vaulting)
         ready = asyncio.get_running_loop().create_future()
         ready.set_result(True)
@@ -1186,7 +1265,7 @@ class RequestLockTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_sources_read_runs_while_another_request_holds_the_lock(self):
         roling, _ = _load_roling()
-        worker = WorkerRequests(roling).worker
+        worker = WorkerRequests(roling, Vaults().vaulting).worker
         self.assertEqual(worker._UNLOCKED_METHODS, frozenset({"sources.read"}))
         reached = []
 
@@ -1207,7 +1286,9 @@ class RequestLockTest(unittest.IsolatedAsyncioTestCase):
 
 
 class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
-    """The engine keeps its last read until the open vault changes (opened, created, locked or closed)."""
+    """The engine keeps its last read while the same vault stays open, and drops it when a request leaves another
+    vault open, or none. Through the worker's handle_request, with vaulting's own vaults.* methods (Vaults);
+    my-wallet is open when a test starts."""
 
     async def asyncSetUp(self):
         self.roling, _ = _load_roling()
@@ -1224,14 +1305,37 @@ class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
                 return document
             return files[url[len(BASE):-len(".json")]]
         self.roling._fetch_bytes = fetch_bytes
-        self.request = WorkerRequests(self.roling)
-        self.roling.vaulting = FakeVaulting()
+        self.vaults = Vaults()
+        self.roling.vaulting = self.vaults.vaulting
+        self.request = WorkerRequests(self.roling, self.vaults.vaulting)
+        await self.open(VAULT)
 
-    def take_on(self):
+    async def open(self, vault, passcode=""):
+        self.assertEqual(await self.request("vaults.open", {"vaultId": vault, "passcode": passcode}),
+                         {"vault": {"id": vault, "opened": True}})
+
+    def start_reading(self):
+        return asyncio.ensure_future(self.request("sources.read", {"address": "mad.seriouscoder.one"}))
+
+    async def read(self):
+        self.assertIn("source", await self.start_reading())
+
+    def read_kept(self):
+        return self.roling._LAST_READ is not None
+
+    def take_on(self, vault=VAULT, alias="cashier"):
         return self.request("roles.takeOn", {
-            "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN,
+            "vaultId": vault, "address": "mad.seriouscoder.one", "target": DROPIN,
             "publication": "dropin-class", "role": "cashier",
-            "identifier": {"mode": "new", "alias": "cashier"}})
+            "identifier": {"mode": "new", "alias": alias}})
+
+    async def assert_read_dropped(self, vault=VAULT):
+        """No read is kept: taking on a role in `vault`, which is open, is refused until the address is read again
+        there."""
+        self.assertFalse(self.read_kept(), "a read is still kept")
+        self.assertEqual(await self.take_on(vault), ("CONFLICT", OPEN_AGAIN))
+        await self.read()
+        self.assertIn("role", await self.take_on(vault))
 
     async def test_forget_last_read_drops_the_read_and_any_read_in_flight(self):
         await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
@@ -1240,29 +1344,110 @@ class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.roling._LAST_READ)
         self.assertEqual(self.roling._READS_STARTED, started + 1)
 
-    async def test_after_the_vault_changes_taking_on_a_role_needs_a_new_read(self):
-        for method in ("vaults.close", "vaults.open", "vaults.create"):
-            with self.subTest(method=method):
-                self.assertIn("source", await self.request("sources.read", {"address": "mad.seriouscoder.one"}))
-                await self.request(method, {"vaultId": VAULT})
-                self.assertEqual(self.request.vault_methods[-1], method)
-                self.assertEqual(await self.take_on(), ("CONFLICT", OPEN_AGAIN))
+    async def test_a_request_that_leaves_the_same_vault_open_keeps_the_read(self):
+        cases = {
+            "a new vault is refused, its name is taken":
+                ("vaults.create", {"name": "My Wallet"}, ("CONFLICT", "Vault 'My Wallet' already exists.")),
+            "a new vault is refused, its name is empty":
+                ("vaults.create", {"name": ""}, ("VALIDATION", "Vault name is required.")),
+            "a vault that is not found is opened":
+                ("vaults.open", {"vaultId": "nope"}, ("NOT_FOUND", "Vault 'nope' was not found.")),
+            "the vault that is already open is opened":
+                ("vaults.open", {"vaultId": VAULT}, {"vault": {"id": VAULT, "opened": True}}),
+        }
+        for name, (method, params, answer) in cases.items():
+            with self.subTest(name):
+                await self.asyncSetUp()
+                await self.read()
+                self.assertEqual(await self.request(method, params), answer)
+                self.assertIn("role", await self.take_on())
+
+    async def test_a_new_vault_that_is_made_keeps_the_read(self):
+        await self.read()
+        made = await self.request("vaults.create", {"name": "Third", "passcode": "third-pass"})
+        self.assertEqual((made["vault"]["id"], made["vault"]["opened"]), ("third", False))
+        self.assertEqual(self.vaults.built, [VAULT, "third"])  # the new vault was set up; my-wallet stayed open
+        self.assertIn("role", await self.take_on())
+
+    async def test_a_persist_and_reload_keeps_the_read(self):
+        await self.read()
+        taken = await self.take_on()  # persists: the vault is closed and opened again inside the request
+        self.assertIn("role", taken)
+        made = await self.request("identifiers.create", {"vaultId": VAULT, "alias": "second"})
+        self.assertEqual(made["identifier"]["alias"], "second")
+        self.assertEqual(await self.request("roles.remove", {"vaultId": VAULT, "id": taken["role"]["id"]}),
+                         {"removed": True})
+        self.assertEqual(self.vaults.built, [VAULT] * 4)  # opened, then reloaded by each of the three requests
+        self.assertIn("role", await self.take_on(alias="cashier 2"))
+
+    async def test_other_methods_keep_the_read(self):
+        await self.read()
+        await self.request("vaults.summary", {"vaultId": VAULT})
+        await self.request("vaults.list")
+        self.assertIn("role", await self.take_on())
+
+    async def test_closing_the_vault_drops_the_read(self):
+        await self.read()
+        self.assertEqual(await self.request("vaults.close", {"vaultId": VAULT}),
+                         {"vault": {"id": VAULT, "opened": False}})
+        self.assertFalse(self.read_kept())
+        await self.open(VAULT)
+        await self.assert_read_dropped()
+
+    async def test_opening_another_vault_drops_the_read(self):
+        await self.read()
+        await self.open(SIDE, "side-pass")
+        await self.assert_read_dropped(SIDE)
+
+    async def test_an_open_that_fails_after_the_open_vault_was_closed_drops_the_read(self):
+        await self.read()
+        self.assertEqual(await self.request("vaults.open", {"vaultId": SIDE, "passcode": "wrong"}),
+                         ("AUTH_FAILED", "Passcode incorrect for this vault."))
+        self.assertFalse(self.read_kept())
+        self.assertEqual(await self.take_on(), ("LOCKED", "Open a vault before calling vault operations."))
+        await self.open(VAULT)
+        await self.assert_read_dropped()
+
+    async def test_a_read_made_with_no_vault_open_is_dropped_when_a_vault_is_opened(self):
+        await self.request("vaults.close", {"vaultId": VAULT})
+        await self.read()
+        await self.open(VAULT)
+        await self.assert_read_dropped()
+
+    async def test_a_read_that_starts_while_another_vault_is_being_opened_is_not_kept(self):
+        # The open is held while my-wallet is being closed (it is still open), or while side is being opened (no
+        # vault is open); the read that starts then finishes before the open does, or after it.
+        for hold in ("close", "build"):
+            for finishes_first in (True, False):
+                with self.subTest(open_held_at=hold, read_finishes_first=finishes_first):
+                    await self.asyncSetUp()
+                    self.vaults.hold = hold
+                    opening = asyncio.ensure_future(
+                        self.request("vaults.open", {"vaultId": SIDE, "passcode": "side-pass"}))
+                    await self.vaults.held.wait()
+                    self.source_may_answer.clear()
+                    reading = self.start_reading()
+                    await self.source_asked.wait()
+                    if finishes_first:
+                        self.source_may_answer.set()
+                        self.assertIn("source", await reading)
+                    self.vaults.go_on.set()
+                    self.assertEqual(await opening, {"vault": {"id": SIDE, "opened": True}})
+                    if not finishes_first:
+                        self.source_may_answer.set()
+                        self.assertIn("source", await reading)  # its caller still gets its answer
+                    await self.assert_read_dropped(SIDE)
 
     async def test_a_read_in_flight_when_the_vault_is_locked_is_not_kept(self):
         self.source_may_answer.clear()
-        reading = asyncio.ensure_future(self.request("sources.read", {"address": "mad.seriouscoder.one"}))
+        reading = self.start_reading()
         await self.source_asked.wait()
         await self.request("vaults.close", {"vaultId": VAULT})
         self.source_may_answer.set()
         self.assertIn("source", await reading)  # its caller still gets its answer
-        self.assertIsNone(self.roling._LAST_READ)
-        self.assertEqual(await self.take_on(), ("CONFLICT", OPEN_AGAIN))
-
-    async def test_other_methods_keep_the_read(self):
-        await self.request("sources.read", {"address": "mad.seriouscoder.one"})
-        await self.request("vaults.summary", {"vaultId": VAULT})
-        await self.request("vaults.list")
-        self.assertIn("role", await self.take_on())
+        self.assertFalse(self.read_kept())
+        await self.open(VAULT)
+        await self.assert_read_dropped()
 
 
 if __name__ == "__main__":
