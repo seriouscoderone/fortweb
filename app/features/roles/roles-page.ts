@@ -97,7 +97,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** A definition's alias, or the start of its SAID when it has none. */
-function definitionName(ref: DefinitionRef): string {
+function definitionName(ref: { alias: string; said: string }): string {
     return ref.alias || `${ref.said.slice(0, 8)}...`;
 }
 
@@ -114,7 +114,7 @@ function responsibilityText(responsibility: Responsibility): string {
     if (responsibility.outcome) {
         parts.push(`produces ${definitionName(responsibility.outcome)}`);
     }
-    const name = responsibility.alias || `${responsibility.said.slice(0, 8)}...`;
+    const name = definitionName(responsibility);
     return parts.length > 0 ? `${name}: ${parts.join("; ")}` : name;
 }
 
