@@ -87,6 +87,8 @@ export type IdentifierChoice = { mode: "new"; alias: string } | { mode: "existin
 export interface TakeOnRequest {
     address: string;
     target: string;
+    /** The publication's name, as read: two publications may list one target. */
+    publication: string;
     role: string;
     identifier: IdentifierChoice;
 }
@@ -243,7 +245,7 @@ function focusShown(selector: string): void {
 }
 
 function openTakeOnDialog(
-    request: { address: string; target: string; role: string },
+    request: Omit<TakeOnRequest, "identifier">,
     identifiers: VaultIdentifier[],
     onTakeOn: NonNullable<RolesPageProps["onTakeOn"]>,
 ): void {
@@ -642,7 +644,8 @@ export function renderRolesPage({
                     onShowRoles,
                     takeOn: take
                         ? (publication, role) => openTakeOnDialog(
-                            { address: view.source.address, target: publication.target, role }, identifiers, take)
+                            { address: view.source.address, target: publication.target, publication: publication.name,
+                                role }, identifiers, take)
                         : undefined,
                 }));
             }
