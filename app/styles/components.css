@@ -2618,3 +2618,154 @@
     text-align: center;
     color: var(--color-text-secondary, #5d5d55);
 }
+
+/* Roles page. Everything here stays still: no transitions or animation while a read runs. */
+.roles-page {
+    gap: var(--space-4);
+}
+
+.roles-open__form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--space-3);
+}
+
+.roles-open__form .field {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.roles-open__form .button {
+    min-height: 50px;
+}
+
+.roles-open .status-line {
+    margin: var(--space-2) 0 0;
+}
+
+.roles-open .status-line:empty {
+    display: none;
+}
+
+.roles-result,
+.roles-publications {
+    display: grid;
+    gap: var(--space-4);
+}
+
+.roles-result:empty {
+    display: none;
+}
+
+.roles-source,
+.roles-publication,
+.roles-mine {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.roles-source p,
+.roles-publication p,
+.roles-mine p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.roles-source h2,
+.roles-publication h3 {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.roles-publication h3 {
+    font-size: 1.05rem;
+    color: var(--color-text-dark);
+}
+
+.roles-publication__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.roles-tag {
+    padding: 2px 10px;
+    border: 1px solid var(--color-border-table);
+    border-radius: var(--radius-pill);
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.roles-publication__problem {
+    color: var(--color-danger);
+}
+
+.roles-publication__toggle {
+    justify-self: start;
+}
+
+.roles-publication__roles {
+    display: grid;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--color-divider);
+}
+
+.roles-publication__roles[hidden] {
+    display: none;
+}
+
+.roles-publication__roles h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--color-text-dark);
+    overflow-wrap: anywhere;
+}
+
+.roles-role-list {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.roles-role {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border-table);
+    border-radius: var(--radius-field);
+    min-width: 0;
+}
+
+.roles-role__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.roles-role__header h5 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--color-text-dark);
+    overflow-wrap: anywhere;
+}
+
+.roles-role__duties {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.9rem;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+}
