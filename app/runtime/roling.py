@@ -25,8 +25,11 @@ FAULT_CODES = {
     "TOO_MUCH": "BAD_RESPONSE",
 }
 
-# The full result of the last successful sources.read, definitions included (taking on a role reads it).
+# The full result of the newest sources.read, definitions included (taking on a role reads it). Reads run
+# concurrently: each takes a number when it starts, and its result is kept only if no newer read has started since,
+# so _LAST_READ always belongs to the most recently requested address or stays what it was.
 _LAST_READ: dict | None = None
+_READS_STARTED = 0
 
 
 async def _settle(value):
@@ -124,7 +127,9 @@ def _clock() -> float:
 
 
 async def _sources_read(params: dict) -> dict:
-    global _LAST_READ
+    global _LAST_READ, _READS_STARTED
+    _READS_STARTED += 1
+    sequence = _READS_STARTED
     address = params.get("address")
     if not isinstance(address, str):
         address = ""
@@ -132,7 +137,8 @@ async def _sources_read(params: dict) -> dict:
         result = await sourcing.read_source(address, fetch_bytes=_fetch_bytes, digest=_digest, clock=_clock)
     except sourcing.SourceFault as fault:
         raise RuntimeFault(FAULT_CODES[fault.code], fault.message) from None
-    _LAST_READ = result
+    if sequence == _READS_STARTED:
+        _LAST_READ = result
     return {key: value for key, value in result.items() if key != "definitions"}
 
 

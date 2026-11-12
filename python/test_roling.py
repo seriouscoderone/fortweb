@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import types
@@ -101,6 +102,37 @@ class SourcesReadTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeFault):
             await self.roling.dispatch("sources.read", {"address": "http://x"})
         self.assertIs(self.roling._LAST_READ, last)
+
+    async def test_newest_read_wins_when_an_older_read_finishes_last(self):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        text = (FIXTURES / "source.json").read_text("utf-8")
+        older_address = "https://older.example.test/source.json"
+        documents = {
+            ADDRESS: text.encode(),
+            older_address: text.replace(ADDRESS, older_address).encode(),
+        }
+        older_may_answer = asyncio.Event()
+        older_waiting = asyncio.Event()
+
+        async def fetch_bytes(url, timeout_ms):
+            if url == older_address:
+                older_waiting.set()
+                await older_may_answer.wait()
+            if url in documents:
+                return documents[url]
+            return files[url.rsplit("/", 1)[1][:-len(".json")]]
+        self.roling._fetch_bytes = fetch_bytes
+
+        older = asyncio.ensure_future(self.roling.dispatch("sources.read", {"address": "older.example.test"}))
+        await older_waiting.wait()
+        newer = await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+        self.assertEqual(self.roling._LAST_READ["source"]["host"], "mad.seriouscoder.one")
+        older_may_answer.set()
+        older_result = await older
+        # Both callers get their own answer; the kept read stays the newest one requested.
+        self.assertEqual(older_result["source"]["host"], "older.example.test")
+        self.assertEqual(newer["source"]["host"], "mad.seriouscoder.one")
+        self.assertEqual(self.roling._LAST_READ["source"]["host"], "mad.seriouscoder.one")
 
     async def test_method_not_yet_available(self):
         for method in ("roles.list", "roles.takeOn", "roles.remove", "sources.other"):

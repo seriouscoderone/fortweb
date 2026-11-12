@@ -89,6 +89,10 @@ IOS_LOOPBACK_PREFIX = "_fortios"
 IOS_LOOPBACK_NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 _MODULES = None
 _REQUEST_LOCK = asyncio.Lock()
+# Methods that touch no vault and run without the request lock. A source read may take a minute; holding the lock
+# that long would make any other request time out, and a timed-out request restarts the worker (closing the vault).
+# Reads run side by side; roling keeps only the newest one's result.
+_UNLOCKED_METHODS = frozenset({"sources.read"})
 _RUNTIME_READY_TASK = None
 
 
@@ -434,8 +438,11 @@ async def handle_request(raw_message):
 
     try:
         await _ensure_runtime_ready()
-        async with _REQUEST_LOCK:
+        if method in _UNLOCKED_METHODS:
             result = await _dispatch(method, params)
+        else:
+            async with _REQUEST_LOCK:
+                result = await _dispatch(method, params)
         return json.dumps(
             {
                 "id": message_id,

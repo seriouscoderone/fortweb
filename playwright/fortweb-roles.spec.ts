@@ -36,9 +36,21 @@ async function setUpWallet(page: Page): Promise<void> {
     await expect(page.getByRole('heading', { name: 'Local Identifiers', exact: true })).toBeVisible({ timeout: 180_000 });
 }
 
-async function readSource(page: Page, address: string): Promise<Outcome> {
-    return page.evaluate(async (text) => {
-        const holder = window as unknown as { rolesTestBridge?: { request(method: string, params: object): Promise<unknown> } };
+async function openStartPage(page: Page): Promise<void> {
+    await page.goto('/fortweb/app/index.html');
+    await expect(page.getByRole('heading', { name: 'Set up your wallet' })).toBeVisible({ timeout: 240_000 });
+}
+
+interface TestWindow {
+    rolesTestBridge?: { request(method: string, params: object): Promise<unknown> };
+    rolesPendingRead?: Promise<Outcome>;
+    rolesPendingReadSettled?: boolean;
+}
+
+/** Starts a request on the test's bridge (made on first use) and keeps its outcome on window.rolesPendingRead. */
+async function startRequest(page: Page, method: string, params: object): Promise<void> {
+    await page.evaluate(async ([name, args]) => {
+        const holder = window as unknown as TestWindow;
         if (!holder.rolesTestBridge) {
             const bridgeModule = '/fortweb/app/runtime/bridge.js';
             const { createRuntimeBridge } = await import(bridgeModule);
@@ -48,13 +60,43 @@ async function readSource(page: Page, address: string): Promise<Outcome> {
                 runtimeOriginContract: null,
             });
         }
+        holder.rolesPendingReadSettled = false;
+        holder.rolesPendingRead = holder.rolesTestBridge.request(name as string, args as object).then(
+            (result) => ({ ok: true, result }) as Outcome,
+            (error: { code?: string; message?: string }) =>
+                ({ ok: false, code: String(error.code), message: String(error.message) }) as Outcome,
+        ).finally(() => { holder.rolesPendingReadSettled = true; });
+    }, [method, params] as const);
+}
+
+async function finishRequest(page: Page): Promise<Outcome> {
+    return page.evaluate(() => (window as unknown as TestWindow).rolesPendingRead as Promise<Outcome>);
+}
+
+/** One more request on the same bridge, answered within `withinMs` or reported as code 'STILL_WAITING'. */
+async function requestWithin(page: Page, method: string, withinMs: number): Promise<{ ok: boolean; code?: string }> {
+    return page.evaluate(async ([name, limit]) => {
+        const bridge = (window as unknown as TestWindow).rolesTestBridge;
+        if (!bridge) throw new Error('no test bridge yet');
+        let timer = 0;
+        const late = new Promise<{ ok: boolean; code?: string }>((resolve) => {
+            timer = window.setTimeout(() => resolve({ ok: false, code: 'STILL_WAITING' }), limit as number);
+        });
+        const answered = bridge.request(name as string, {}).then(
+            () => ({ ok: true }),
+            (error: { code?: string }) => ({ ok: false, code: String(error.code) }),
+        );
         try {
-            return { ok: true, result: await holder.rolesTestBridge.request('sources.read', { address: text }) };
-        } catch (error) {
-            const failure = error as { code?: string; message?: string };
-            return { ok: false, code: String(failure.code), message: String(failure.message) };
+            return await Promise.race([answered, late]);
+        } finally {
+            window.clearTimeout(timer);
         }
-    }, address) as Promise<Outcome>;
+    }, [method, withinMs] as const);
+}
+
+async function readSource(page: Page, address: string): Promise<Outcome> {
+    await startRequest(page, 'sources.read', { address });
+    return finishRequest(page);
 }
 
 function byTarget(outcome: Outcome): Record<string, Publication> {
@@ -137,6 +179,26 @@ test.describe('sources.read', () => {
         expect(await readSource(page, 'down.example.test')).toEqual({
             ok: false, code: 'NETWORK_ERROR', message: 'Could not reach down.example.test.',
         });
+    });
+
+    test('a slow read does not hold up other requests on the same bridge', async ({ context, page }) => {
+        let arrived!: () => void;
+        const sourceRequested = new Promise<void>((resolve) => { arrived = resolve; });
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => { release = resolve; });
+        await routeFixtureSource(context, { holdSource: { arrived, release: released } });
+        await openStartPage(page);
+        await startRequest(page, 'sources.read', { address: FIXTURE_HOST });
+        try {
+            await sourceRequested; // the read is now waiting for the source's answer
+            expect(await requestWithin(page, 'vaults.list', 10_000)).toEqual({ ok: true });
+            expect(await requestWithin(page, 'settings.get', 10_000)).toEqual({ ok: true });
+            expect(await page.evaluate(() => (window as unknown as TestWindow).rolesPendingReadSettled)).toBe(false);
+        } finally {
+            release();
+        }
+        const outcome = await finishRequest(page);
+        expect(outcome.ok && outcome.result.checked).toBe(26);
     });
 
     test('an address the wallet cannot open', async ({ page }) => {

@@ -20,6 +20,8 @@ export interface FixtureSourceOptions {
     tamper?: string;
     /** Serve a source document of 1,000,001 bytes. */
     oversize?: boolean;
+    /** Hold the answer to source.json: `arrived` is called when its request comes in, the answer waits for `release`. */
+    holdSource?: { arrived(): void; release: Promise<void> };
 }
 
 export function fixtureSourceDocument(): Buffer {
@@ -73,6 +75,10 @@ export async function routeFixtureSource(context: BrowserContext, options: Fixtu
     await context.route(`https://${FIXTURE_HOST}/**`, async (route) => {
         const { pathname } = new URL(route.request().url());
         if (pathname === '/source.json') {
+            if (options.holdSource) {
+                options.holdSource.arrived();
+                await options.holdSource.release;
+            }
             await route.fulfill({ status: 200, headers, body: document });
             return;
         }
