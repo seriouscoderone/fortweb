@@ -326,6 +326,38 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                          ("NOT_READABLE", "mad.example.test does not allow wallets to read it yet."))
         self.assertEqual([options.mode for _, options, _ in js.calls], ["cors", "no-cors"])
 
+    async def test_probe_has_its_own_short_budget(self):
+        async def answer(url, options):
+            if options.mode == "cors":
+                raise RuntimeError("TypeError: Failed to fetch")
+            return types.SimpleNamespace(status=0, type="opaque")
+        js = self.stub(answer)
+        await self.fault(timeout_ms=10_000)
+        self.assertEqual(self.roling.PROBE_MS, 3_000)
+        self.assertEqual([t.ms for t in js.timers], [10_000, 3_000])
+        self.assertTrue(all(t.cleared for t in js.timers))
+
+    async def test_probe_is_aborted_once_it_settles(self):
+        for probe_resolves in (True, False):
+            with self.subTest(probe_resolves=probe_resolves):
+                async def answer(url, options):
+                    if options.mode == "cors" or not probe_resolves:
+                        raise RuntimeError("TypeError: Failed to fetch")
+                    return types.SimpleNamespace(status=0, type="opaque")
+                js = self.stub(answer)
+                await self.fault()
+                self.assertEqual(len(js.controllers), 2)
+                self.assertTrue(js.controllers[1].aborted)
+
+    async def test_read_rejected_after_its_time_is_not_probed(self):
+        async def answer(url, options):
+            js.now += 10_000  # rejected just as the request's time ran out, before its timer was run
+            raise RuntimeError("TypeError: Failed to fetch")
+        js = self.stub(answer)
+        fault = await self.fault(timeout_ms=10_000)
+        self.assertEqual(fault.code, "UNREACHABLE")
+        self.assertEqual(len(js.calls), 1)
+
     async def test_unexpected_error_is_unreachable_and_does_not_leak_its_text(self):
         def broken_headers(name):
             raise RuntimeError("JsException: secret internal detail")
@@ -361,6 +393,26 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         problems = {p["name"]: p["problem"] for p in got["publications"]}
         self.assertEqual(problems, {"class-brick": None, "dropin-class": "mismatch", "member-class": None})
 
+    async def test_read_never_starts_a_fetch_after_sixty_seconds(self):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
+
+        async def answer(url, options):
+            js.now += 4_000 if options.mode == "cors" else 0
+            if url == URL:
+                return response(chunks=(document,))
+            if len(js.calls) % 3 == 0:
+                raise RuntimeError("TypeError: Failed to fetch")  # probed; the probe answers at once
+            return response(chunks=(files[url.rsplit("/", 1)[1][:-len(".json")]],))
+        js = self.stub(answer)
+        js.now = 50_000.0
+        with self.assertRaises(RuntimeFault) as raised:
+            await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual((raised.exception.code, str(raised.exception)),
+                         ("NETWORK_ERROR", "Could not reach mad.example.test."))
+        self.assertTrue(js.calls)
+        self.assertTrue(all(at < 50_000 + 60_000 for _, _, at in js.calls), [at for _, _, at in js.calls])
+        self.assertEqual(sum(1 for _, options, _ in js.calls if options.mode == "cors"), 15)
 
 
 if __name__ == "__main__":

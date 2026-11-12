@@ -25,6 +25,10 @@ FAULT_CODES = {
     "TOO_MUCH": "BAD_RESPONSE",
 }
 
+# A no-cors probe only tells "cannot be reached" from "does not allow the read"; it gets this fixed budget,
+# whatever the request's own timeout.
+PROBE_MS = 3_000
+
 # The full result of the newest sources.read, definitions included (taking on a role reads it). Reads run
 # concurrently: each takes a number when it starts, and its result is kept only if no newer read has started since,
 # so _LAST_READ always belongs to the most recently requested address or stays what it was.
@@ -74,6 +78,15 @@ def _abort_quietly(controller) -> None:
         pass
 
 
+async def _probe(url: str) -> bool:
+    """Whether a no-cors request to `url` is answered within PROBE_MS. Its opaque body is never read: once the probe
+    settles its controller is aborted, so nothing keeps streaming."""
+    probe, controller, timer, _ = await _fetch_or_none(url, "no-cors", PROBE_MS)
+    js.clearTimeout(timer)
+    _abort_quietly(controller)
+    return probe is not None
+
+
 async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
     """The body of a 200 JSON response at `url`, at most sourcing.FILE_BYTES, within `timeout_ms`; else SourceFault.
 
@@ -89,16 +102,15 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
 
 
 async def _fetch_checked(url: str, timeout_ms: int, host: str) -> bytes:
+    started = _clock()
     response, controller, timer, fired = await _fetch_or_none(url, "cors", timeout_ms)
     if response is None:
-        if fired:
+        if fired or _clock() - started >= timeout_ms:
             raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.")
         # A rejected cors fetch is either a host that cannot be reached or one that does not allow the read.
-        # An opaque no-cors probe tells them apart; its body is never read.
-        probe, _, probe_timer, _ = await _fetch_or_none(url, "no-cors", timeout_ms)
-        if probe is None:
+        # A no-cors probe tells them apart.
+        if not await _probe(url):
             raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.")
-        js.clearTimeout(probe_timer)
         raise sourcing.SourceFault("NOT_READABLE", f"{host} does not allow wallets to read it yet.")
     try:
         content_type = str(response.headers.get("content-type") or "").lower()
