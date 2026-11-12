@@ -479,7 +479,11 @@ BASE = "https://mad.seriouscoder.one/"
 
 
 class FakeSource:
-    """Serves the fixture source as fetch_bytes would, and records every call."""
+    """Serves the fixture source as fetch_bytes would, and records every call.
+
+    `fail` names the definitions whose fetch raises a fault: SAIDs alone when nothing of the body was received, or
+    a dict of SAID -> the body bytes received before the fault.
+    """
 
     def __init__(self, s, *, document: bytes | None = None, files: dict | None = None, fail=(), clock=None,
                  ms_per_fetch: float = 0.0):
@@ -488,7 +492,7 @@ class FakeSource:
         self.ms_per_fetch = ms_per_fetch
         self.document = (FIXTURES / "source.json").read_bytes() if document is None else document
         self.files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")} if files is None else files
-        self.fail = set(fail)
+        self.fail = dict(fail) if isinstance(fail, dict) else dict.fromkeys(fail, 0)
         self.calls: list[tuple[str, int]] = []
 
     async def fetch_bytes(self, url: str, timeout_ms: int) -> bytes:
@@ -500,11 +504,21 @@ class FakeSource:
         prefix = BASE + "definitions/"
         said = url[len(prefix):-len(".json")] if url.startswith(prefix) and url.endswith(".json") else None
         if said in self.fail or said not in self.files:
-            raise self.s.SourceFault("UNREACHABLE", "Could not reach mad.seriouscoder.one.")
+            received = self.fail.get(said, 0)
+            if received > self.s.FILE_BYTES:  # the real fetch stops reading a file once it is over the limit
+                raise self.s.SourceFault(
+                    "TOO_MUCH", "mad.seriouscoder.one publishes more than the wallet reads in one go.",
+                    received=received)
+            raise self.s.SourceFault("UNREACHABLE", "Could not reach mad.seriouscoder.one.", received=received)
         return self.files[said]
 
     def definition_calls(self) -> list[str]:
         return [url for url, _ in self.calls if url != ADDRESS]
+
+
+def _unserved_saids(count: int) -> list[str]:
+    """SAIDs, in sorted order, of definitions a test never serves whole: their fetch fails."""
+    return [f"EA{i:042d}" for i in range(count)]
 
 
 class Clock:
@@ -515,6 +529,22 @@ class Clock:
 
     def __call__(self) -> float:
         return self.now
+
+
+class SourceFaultTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+
+    def test_fault_carries_the_body_bytes_received_before_it(self):
+        fault = self.s.SourceFault("TOO_MUCH", "example.org publishes more than the wallet reads in one go.",
+                                   received=1_000_001)
+        self.assertEqual(fault.received, 1_000_001)
+        self.assertEqual((fault.code, fault.message, str(fault)),
+                         ("TOO_MUCH", "example.org publishes more than the wallet reads in one go.",
+                          "example.org publishes more than the wallet reads in one go."))
+
+    def test_fault_received_nothing_unless_told(self):
+        self.assertEqual(self.s.SourceFault("UNREACHABLE", "Could not reach example.org.").received, 0)
 
 
 class ReadSourceTest(unittest.TestCase):
@@ -684,7 +714,8 @@ class ReadSourceTest(unittest.TestCase):
     def test_mismatch_wins_over_the_byte_budget(self):
         files = self.big_definitions(7, 900_000)
         saids = list(files)
-        failing, cut = saids[0], saids[6]  # a failed fetch receives no bytes; saids[1:6] spend the budget
+        # This fake fails `failing` before any body byte arrives, so only saids[1:6] spend the budget.
+        failing, cut = saids[0], saids[6]
         document = _doc(
             serves=[{"said": said} for said in saids[:6]] + [{"said": cut, "refers": [failing]}],
             publications=[_publication(target=said) for said in saids[:6]] + [_publication(target=cut)])
@@ -694,6 +725,48 @@ class ReadSourceTest(unittest.TestCase):
         # The last publication needs the failed definition and one cut by the budget: mismatch wins.
         self.assertEqual(got["publications"][6]["problem"], "mismatch")
         self.assertEqual(got["publications"][0]["problem"], "mismatch")
+
+    def test_byte_budget_counts_the_bytes_received_by_failed_definitions(self):
+        # A hostile source: every definition is just over the file limit, so each fetch fails after 1,000,001 bytes.
+        saids = _unserved_saids(50)
+        document = _doc(
+            serves=[{"said": said} for said in saids[:49]] + [{"said": saids[49], "refers": [saids[0]]}],
+            publications=[_publication(target=said) for said in saids])
+        fake = FakeSource(self.s, document=document, files={}, fail=dict.fromkeys(saids, 1_000_001))
+        got = self.read(fake)
+        # Four such fetches spend the budget (4,000,004 bytes): the other 46 definitions are never requested.
+        self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids[:4]])
+        # Requested and failed: mismatch. Only cut: limit. The last one is cut and also needs saids[0], which failed.
+        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 4 + ["limit"] * 45 + ["mismatch"])
+        self.assertEqual((got["checked"], got["definitions"]), (0, {}))
+
+    def test_byte_budget_adds_up_definitions_that_arrived_and_ones_that_failed(self):
+        files = self.big_definitions(5, 900_000)
+        good = list(files)
+        too_big, cut_off, missing = _unserved_saids(3)
+        order = [good[0], too_big, good[1], cut_off, missing, good[2], good[3], good[4]]
+        document = _doc(serves=[{"said": said} for said in order],
+                        publications=[_publication(target=said) for said in order])
+        fake = FakeSource(self.s, document=document, files=files,
+                          fail={too_big: 1_000_001, cut_off: 600_000, missing: 0})
+        got = self.read(fake)
+        # 900,000 + 1,000,001 + 900,000 + 600,000 + 0 is under the budget, so good[2] is fetched; its 900,000 bytes
+        # spend the budget and the last two are never requested. Counting only what arrived whole (2,700,000) would
+        # fetch them both.
+        self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in order[:6]])
+        self.assertEqual([p["problem"] for p in got["publications"]],
+                         [None, "mismatch", None, "mismatch", "mismatch", None, "limit", "limit"])
+        self.assertEqual(got["checked"], 3)
+
+    def test_faults_that_received_nothing_spend_none_of_the_byte_budget(self):
+        saids = _unserved_saids(10)
+        document = _doc(serves=[{"said": said} for said in saids],
+                        publications=[_publication(target=said) for said in saids])
+        fake = FakeSource(self.s, document=document, files={}, fail=saids)  # as if every definition answered 404
+        got = self.read(fake, read_bytes=len(document) + 1)
+        # The document leaves one byte of the budget, and ten faults that received nothing do not spend it.
+        self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids])
+        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 10)
 
     def test_roles_of_every_fixture_publication_match_role_derivation(self):
         got = self.read(FakeSource(self.s))

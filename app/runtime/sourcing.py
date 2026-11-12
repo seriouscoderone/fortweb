@@ -18,7 +18,11 @@ FILE_BYTES = 1_000_000
 REQUEST_MS = 10_000
 READ_MS = 60_000
 DEFINITIONS_PER_READ = 50
-READ_BYTES = 4_000_000  # source document and definitions together, as received, in one read
+# Wallet-only: the bytes one read may receive, over the source document and every definition fetched. A definition
+# whose fetch fails counts with the bytes read before it failed. The total is checked before each fetch, not during
+# one, so a read can pass this by at most one file (FILE_BYTES, plus the last chunk read of a file that turns out
+# larger). That is accepted.
+READ_BYTES = 4_000_000
 MAX_ADDRESS = 512
 JSON_DEPTH = 64
 _IPV4 = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
@@ -31,12 +35,16 @@ _ENDING = "/source.json"
 
 
 class SourceFault(Exception):
-    """A source could not be read. `code` is stable; `message` is for the person."""
+    """A source could not be read. `code` is stable; `message` is for the person.
 
-    def __init__(self, code: str, message: str):
+    `received` is the number of body bytes the fetch had read before the fault: 0 when it came before any.
+    """
+
+    def __init__(self, code: str, message: str, *, received: int = 0):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.received = received
 
 
 def is_said(text) -> bool:
@@ -365,14 +373,15 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
                       read_bytes: int = READ_BYTES) -> dict:
     """Read the source at `text` and the definitions its publications need.
 
-    `fetch_bytes(url, timeout_ms)` is awaited and returns the bytes or raises SourceFault; `digest(bytes)` is
-    Blake3-256; `clock()` gives milliseconds. A fault on the address or the source document stops the read, and so
-    does running out of time (UNREACHABLE); the clock is checked before and after every fetch. A definition that
-    cannot be fetched, fails its SAID check or is not JSON does not stop the read: every publication whose closure
-    holds it gets problem "mismatch". Once `definitions_per_read` definitions have been fetched, or the bytes received
-    in this read (source document and definitions) reach `read_bytes`, nothing more is fetched, and a publication
-    that still needs one gets problem "limit" (unless one of its definitions already failed, which is "mismatch").
-    Each definition is fetched at most once. A publication with a problem has no roles.
+    `fetch_bytes(url, timeout_ms)` is awaited and returns the bytes or raises SourceFault, whose `received` says how
+    many body bytes it had read; `digest(bytes)` is Blake3-256; `clock()` gives milliseconds. A fault on the address
+    or the source document stops the read, and so does running out of time (UNREACHABLE); the clock is checked
+    before and after every fetch. A definition that cannot be fetched, fails its SAID check or is not JSON does not
+    stop the read: every publication whose closure holds it gets problem "mismatch". Once `definitions_per_read`
+    definitions have been fetched, or the bytes received in this read reach `read_bytes` (the source document, every
+    definition returned, and what the fetch of a failed definition had read), nothing more is fetched, and a
+    publication that still needs one gets problem "limit" (unless one of its definitions already failed, which is
+    "mismatch"). Each definition is fetched at most once. A publication with a problem has no roles.
     """
     where = normalize_address(text)
     host = where["host"]
@@ -405,11 +414,11 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
                 break
             try:
                 served = await fetch_bytes(definition_address(where["base"], said), time_left())
-            except SourceFault:
-                served = None
-            time_left()
-            if served is not None:
                 received += len(served)
+            except SourceFault as fault:
+                served = None
+                received += fault.received  # what a failed fetch had read is spent too
+            time_left()
             fetched[said] = None if served is None else _definition(served, said, digest)
             del served
         failed = any(said in fetched and fetched[said] is None for said in needed)
