@@ -1181,6 +1181,31 @@ class WorkerRequests:
         return answer["result"] if answer["ok"] else (answer["error"]["code"], answer["error"]["message"])
 
 
+class RequestLockTest(unittest.IsolatedAsyncioTestCase):
+    """sources.read is the only method that runs outside the worker's request lock; roles.* run under it."""
+
+    async def test_only_sources_read_runs_while_another_request_holds_the_lock(self):
+        roling, _ = _load_roling()
+        worker = WorkerRequests(roling).worker
+        self.assertEqual(worker._UNLOCKED_METHODS, frozenset({"sources.read"}))
+        reached = []
+
+        async def dispatch(method, params):
+            reached.append(method)
+            return {}
+        worker._dispatch = dispatch
+        methods = ("sources.read", "roles.list", "roles.takeOn", "roles.remove")
+        async with worker._REQUEST_LOCK:  # another request is running
+            answers = [asyncio.ensure_future(worker.handle_request(json.dumps(
+                {"id": method, "kind": "fortweb.runtime.request", "method": method, "params": {}})))
+                for method in methods]
+            for _ in range(20):
+                await asyncio.sleep(0)
+            self.assertEqual(reached, ["sources.read"])
+        await asyncio.gather(*answers)
+        self.assertEqual(sorted(reached), sorted(methods))
+
+
 class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
     """The engine keeps its last read until the open vault changes (opened, created, locked or closed)."""
 
