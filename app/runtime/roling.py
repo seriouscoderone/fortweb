@@ -376,6 +376,9 @@ async def _roles_take_on(params: dict) -> dict:
         roles.pin(keys=(record.id,), val=record)
         if alias is not None:
             # 3. The identifier is made; 4. the record is completed with it.
+            # Known limit: if that second write failed, the role's data is removed but the identifier just made
+            # stays, for the person to take the role on with. Habery.deleteHab would not undo it: it leaves the key
+            # manager's entries for the alias, so making that alias again would be refused ("Already incepted").
             record.aid = vaulting.create_identifier(hby, alias).pre
             roles.pin(keys=(record.id,), val=record)
     except Exception as error:

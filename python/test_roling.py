@@ -434,6 +434,31 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics, [("role_store_failed",
                                         {"level": "error", "exception": "UnicodeEncodeError"})])
 
+    async def test_a_record_that_cannot_be_completed_leaves_only_the_identifier_just_made(self):
+        # The known limit: the role's data is written, the identifier is made, and the write that completes the
+        # record with it fails. The role's data is removed; the identifier stays and can take the role on.
+        await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, target=CLASS_BRICK)  # shares definitions
+        stores, identifiers, reloads = self.snapshot()
+        record_writes = []
+
+        def fail_write(subkey, keys):
+            if subkey == "frol.":
+                record_writes.append(keys)
+            return subkey == "frol." and len(record_writes) == 2
+        self.vault.data.fail_write = fail_write
+        self.diagnostics.clear()
+        self.assertEqual(await self.fault("roles.takeOn", self.params(identifier={"mode": "new", "alias": "new one"})),
+                         ("BAD_RESPONSE", "The wallet could not keep that role."))
+        self.assertEqual(self.diagnostics, [("role_store_failed", {"level": "error", "exception": "StoreWriteError"})])
+        self.assertEqual(len(record_writes), 2)
+        stores_after, identifiers_after, reloads_after = self.snapshot()
+        self.assertEqual((stores_after, reloads_after), (stores, reloads))  # no record and no added definition
+        self.assertEqual(sorted(identifiers_after.values()), ["new one", "teacher"])
+        self.vault.data.fail_write = lambda subkey, keys: False
+        made = next(pre for pre, name in identifiers_after.items() if name == "new one")
+        taken = await self.take_on("instructor", {"mode": "existing", "aid": made})
+        self.assertEqual(taken["role"]["identifierAlias"], "new one")
+
     async def test_take_on_with_a_new_identifier_stores_the_role_and_its_definitions(self):
         got = await self.take_on("cashier")
         (pre, hab), = self.vault.habs.items()
