@@ -142,6 +142,8 @@ runs:
           tools/runtime-publication-workflow.test.mjs \
           tools/verify-fortweb-release.test.mjs \
           tools/verify-runtime-package.test.mjs
+        # Test-only dependency: the SAID check tests (test_sourcing, test_roling) need CPython blake3, same version as the bundled wheel.
+        python3 -m pip install --disable-pip-version-check blake3==1.0.8
         python3 -m unittest \
           python/test_acquire_runtime_source.py \
           python/test_build_runtime_source.py \
@@ -149,7 +151,9 @@ runs:
           python/test_serve_runtime_browser.py \
           python/test_transporting.py \
           python/test_onboarding.py \
-          python/test_vaulting.py
+          python/test_vaulting.py \
+          python/test_sourcing.py \
+          python/test_roling.py
 
     - name: Check runtime JS
       shell: bash
