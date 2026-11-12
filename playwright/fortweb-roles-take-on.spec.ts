@@ -353,6 +353,9 @@ test.describe('Taking on a role', () => {
         await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 240_000 });
         const removed = await page.evaluate(async () => {
             const names = ['frol.', 'fdef.'].map((store) => `IDBMap/@fortweb/fortweb-vault-my-wallet:${store}`);
+            const present = (await indexedDB.databases()).map((database) => database.name);
+            const missing = names.filter((name) => !present.includes(name));
+            if (missing.length > 0) throw new Error(`not there to remove: ${missing.join(', ')}`);
             for (const name of names) {
                 await new Promise<void>((resolve, reject) => {
                     const request = indexedDB.deleteDatabase(name);
