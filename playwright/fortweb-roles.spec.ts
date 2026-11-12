@@ -440,7 +440,14 @@ test.describe('Roles page', () => {
             await held.arrived;
             await expect(roles.open).toBeDisabled();
             await expect(roles.status).toHaveText('Reading...');
-            await roles.address.press('Enter');
+            // Enter does not submit a form whose only submit button is disabled, so the submit is sent directly:
+            // only the page's own guard can stop it.
+            const prevented = await roles.main.locator('[data-roles-form]').evaluate((form) => {
+                const event = new Event('submit', { cancelable: true });
+                form.dispatchEvent(event);
+                return event.defaultPrevented;
+            });
+            expect(prevented).toBe(true);
             await expect(roles.status).toHaveText('Reading...');
             expect(held.count()).toBe(1);
         } finally {
