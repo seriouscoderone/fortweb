@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
-    setUpWallet, heldSource, rolesPage, openAddress, showDropinRoles, unlock, closePhoneMenu,
+    setUpWallet, heldSource, rolesPage, openAddress, showDropinRoles, unlock, closePhoneMenu, myRoles,
+    takeOnWithNewIdentifier,
 } from './fixtures/roles.js';
 
 // The last read kept by the app.
@@ -55,6 +56,37 @@ test.describe('The last read', () => {
         await expect(roles.address).toHaveValue('');
         await expect(roles.cards).toHaveCount(0);
         await expect(roles.host).toHaveCount(0);
+    });
+
+    test('is kept, and takes a role on, after a new vault was refused for its name', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        // To the vault picker, where a new vault named like the open one is refused, and back to the open vault.
+        await page.locator('a.topbar__brand-link').click();
+        await expect(page.locator('.home-splash')).toBeVisible({ timeout: 60_000 });
+        const drawer = page.getByRole('dialog', { name: 'Vault switcher' });
+        await page.getByRole('button', { name: 'Vaults', exact: true }).click();
+        await drawer.getByRole('button', { name: 'Initialize New Vault' }).click();
+        const form = page.locator('[data-create-vault-form]');
+        await form.locator('input[name="name"]').fill('My Wallet');
+        await page.locator('[data-dialog-submit]').click();
+        await expect(page.locator('[data-create-vault-status]'))
+            .toHaveText('Vault \'My Wallet\' already exists.', { timeout: 150_000 });
+        await page.locator('[data-dialog-cancel]').click();
+        await expect(form).toHaveCount(0);
+        await page.getByRole('button', { name: 'Vaults', exact: true }).click();
+        await drawer.locator('[data-vault-id="my-wallet"]').click();
+        await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 }))
+            .toBeVisible({ timeout: 60_000 });
+        // The page still shows the read, and the engine still has it: the role is taken on.
+        const roles = rolesPage(page);
+        await expect(roles.address).toHaveValue(FIXTURE_HOST);
+        await expect(roles.cards).toHaveCount(3);
+        await expect(roles.card('dropin-class').getByRole('button', { name: 'Hide roles' })).toBeVisible();
+        await takeOnWithNewIdentifier(page, 'cashier');
+        await expect(myRoles(page).item('cashier').getByText('dropin-class at mad.example.test', { exact: true }))
+            .toBeVisible();
     });
 
     test('a read that finishes after leaving the page announces nothing and is there on coming back',
