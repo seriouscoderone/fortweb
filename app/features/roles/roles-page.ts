@@ -555,7 +555,8 @@ function takenRoleItem(role: TakenRole, onRemove: RolesPageProps["onRemove"], st
 
     const remove = element("button", "Remove", "button button--secondary button--small roles-mine__remove");
     remove.type = "button";
-    remove.setAttribute("aria-label", `Remove ${role.role}`);
+    // Two roles may share a name: the identifier tells their buttons apart. setAttribute keeps source text as text.
+    remove.setAttribute("aria-label", `Remove ${role.role}, identifier ${role.identifierAlias || role.aid}`);
     if (onRemove) {
         remove.addEventListener("click", async () => {
             remove.disabled = true;

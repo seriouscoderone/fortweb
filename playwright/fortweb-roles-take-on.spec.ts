@@ -294,7 +294,7 @@ test.describe('Taking on a role', () => {
         await showDropinRoles(page);
         await takeOnWithNewIdentifier(page, 'cashier');
         const cashier = myRoles(page).item('cashier');
-        await cashier.getByRole('button', { name: 'Remove cashier', exact: true }).click();
+        await cashier.getByRole('button', { name: 'Remove cashier, identifier cashier', exact: true }).click();
         await expect(myRoles(page).items).toHaveCount(0, { timeout: 90_000 });
         await expect(myRoles(page).region.getByText('No roles yet. Open an address to see what you can take on.'))
             .toBeVisible();
@@ -307,6 +307,25 @@ test.describe('Taking on a role', () => {
         await page.getByRole('navigation', { name: 'Vault navigation' })
             .getByRole('link', { name: 'Identifiers', exact: true }).click();
         await expect(page.getByRole('link', { name: 'cashier', exact: true })).toBeVisible();
+    });
+
+    test('two roles with one name have Remove buttons named after their identifiers', async ({ context, page }) => {
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        const dialog = await startTakingOn(page, 'cashier');
+        await expect(dialog.name).toHaveValue('cashier 2');
+        await dialog.takeOn.click();
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        const mine = myRoles(page);
+        await expect(mine.region.getByRole('button', { name: /^Remove / })).toHaveText(['Remove', 'Remove']);
+        const names = await mine.region.getByRole('button', { name: /^Remove / }).evaluateAll(
+            (buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+        expect(names).toEqual(['Remove cashier, identifier cashier 2', 'Remove cashier, identifier cashier']);
+        await mine.region.getByRole('button', { name: 'Remove cashier, identifier cashier', exact: true }).click();
+        await expect(mine.items).toHaveCount(1, { timeout: 90_000 });
+        await expect(mine.item('cashier').getByText('Identifier: cashier 2', { exact: true })).toBeVisible();
     });
 
     test('a vault made before roles existed opens with no roles and can take one on', async ({ context, page }) => {
