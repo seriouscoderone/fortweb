@@ -259,3 +259,17 @@ def read_source_document(raw: bytes, address: str) -> dict:
         "catalogs": len(r.get("catalogs", [])),
     }
     return {"document": document, "dropped": dropped}
+
+
+def closure(serves: dict, target: str) -> list[str]:
+    """The target and every served SAID reachable from it through `refers`, sorted; [] when the target is not served."""
+    if target not in serves:
+        return []
+    seen = {target}
+    todo = [target]
+    while todo:
+        for ref in serves[todo.pop()]:
+            if ref in serves and ref not in seen:
+                seen.add(ref)
+                todo.append(ref)
+    return sorted(seen)

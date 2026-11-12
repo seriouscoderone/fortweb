@@ -290,5 +290,39 @@ class SourceDocumentTest(unittest.TestCase):
         self.assertEqual(raised.exception.message, "example.org did not return a valid source.")
 
 
+DROPIN_CLASS = "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4"
+
+
+def _fixture_serves(s) -> dict:
+    return s.read_source_document((FIXTURES / "source.json").read_bytes(), ADDRESS)["document"]["serves"]
+
+
+class ClosureTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+
+    def test_dropin_class_closure(self):
+        serves = _fixture_serves(self.s)
+        got = self.s.closure(serves, DROPIN_CLASS)
+        self.assertIn(DROPIN_CLASS, got)
+        self.assertEqual(len(got), len(set(got)))
+        self.assertEqual(got, sorted(got))
+        self.assertTrue(set(got) <= set(serves))
+        # Every rr of the selection, and what they refer to, is reached.
+        for said in serves[DROPIN_CLASS]:
+            self.assertIn(said, got)
+            self.assertTrue(set(serves[said]) <= set(got))
+
+    def test_target_not_served_gives_nothing(self):
+        self.assertEqual(self.s.closure(_fixture_serves(self.s), SAID_A), [])
+
+    def test_refers_outside_serves_are_left_out(self):
+        self.assertEqual(self.s.closure({SAID_A: [SAID_B]}, SAID_A), [SAID_A])
+
+    def test_cycle_terminates(self):
+        serves = {SAID_A: [SAID_B], SAID_B: [SAID_C], SAID_C: [SAID_A]}
+        self.assertEqual(self.s.closure(serves, SAID_B), [SAID_A, SAID_B, SAID_C])
+
+
 if __name__ == "__main__":
     unittest.main()
