@@ -123,6 +123,17 @@ def _https_address(text: str) -> str | None:
     return address if len(address) <= MAX_ADDRESS else None
 
 
+def source_host(address) -> str:
+    """The host of a valid https address, for a message to the person; "The source" for anything else. Never raises."""
+    if not isinstance(address, str):
+        return "The source"
+    try:
+        host, _ = _https_parts(address)
+    except (SourceFault, ValueError):
+        return "The source"
+    return host
+
+
 def definition_address(base: str, said: str) -> str:
     if not is_said(said):
         raise ValueError(f"not a SAID: {said}")
@@ -203,7 +214,7 @@ def read_source_document(raw: bytes, address: str) -> dict:
     `address`, or a known member has the wrong type. A bad serves entry, refers item, `by` or `oobi` is dropped and
     counted in dropped.entries; a bad publication in dropped.publications. Unknown members are ignored.
     """
-    fault = SourceFault("BAD_SOURCE", f"{urlsplit(address).hostname or address} did not return a valid source.")
+    fault = SourceFault("BAD_SOURCE", f"{source_host(address)} did not return a valid source.")
     try:
         r = _parse_bounded(raw)
     except ValueError:

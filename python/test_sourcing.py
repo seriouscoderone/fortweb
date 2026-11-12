@@ -289,6 +289,14 @@ class SourceDocumentTest(unittest.TestCase):
             self.s.read_source_document(b"[]", "https://example.org/apps/source.json")
         self.assertEqual(raised.exception.message, "example.org did not return a valid source.")
 
+    def test_fault_for_a_malformed_address_never_raises_or_echoes_it(self):
+        for address in ["https://[bad/source.json", "<b>not an address</b>", "http://example.org/source.json", ""]:
+            with self.subTest(address=address):
+                with self.assertRaises(self.s.SourceFault) as raised:
+                    self.s.read_source_document(b"[]", address)
+                self.assertEqual(raised.exception.code, "BAD_SOURCE")
+                self.assertEqual(raised.exception.message, "The source did not return a valid source.")
+
 
 DROPIN_CLASS = "EFQ6ngR2kib-dwmW8mizJ4k5IdO0YysG0xSty9ESHDE4"
 
