@@ -160,6 +160,12 @@ class Controller:
 
 
 class Reader:
+    """A response body: each read serves the next item of `chunks`, then the body is done.
+
+    An item is the bytes of that read. A function is called by that read: it returns the bytes, or raises and the
+    read rejects. An exception is raised when the bytes are taken out of the read (`value.to_py()`).
+    """
+
     def __init__(self, chunks):
         self.chunks = list(chunks)
         self.reads = 0
@@ -170,7 +176,14 @@ class Reader:
         if not self.chunks:
             return types.SimpleNamespace(done=True, value=None)
         chunk = self.chunks.pop(0)
-        return types.SimpleNamespace(done=False, value=types.SimpleNamespace(to_py=lambda: chunk))
+        if callable(chunk):
+            chunk = chunk()
+
+        def to_py():
+            if isinstance(chunk, Exception):
+                raise chunk
+            return chunk
+        return types.SimpleNamespace(done=False, value=types.SimpleNamespace(to_py=to_py))
 
     async def cancel(self):
         self.cancelled = True
@@ -305,6 +318,72 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.stub(answer)
         self.assertEqual(len(await self.roling._fetch_bytes(URL, 10_000)), 1_000_000)
 
+    async def test_too_much_fault_carries_the_bytes_read_before_it(self):
+        served = response(chunks=(b"x" * 600_000, b"x" * 500_000, b"x" * 10))
+
+        async def answer(url, options):
+            return served
+        self.stub(answer)
+        fault = await self.fault()
+        # What was read, not the limit: the second chunk took the body to 1,100,000 bytes.
+        self.assertEqual((fault.code, fault.received), ("TOO_MUCH", 1_100_000))
+
+    async def test_body_that_stops_midway_carries_the_bytes_read_so_far(self):
+        for cause in ("the request's timer", "the connection"):
+            with self.subTest(stopped_by=cause):
+                def third_read():
+                    if cause == "the request's timer":
+                        js.fire(0)  # the time runs out while the third read is waiting
+                        raise RuntimeError("AbortError: signal is aborted without reason")
+                    raise RuntimeError("TypeError: network error")
+                served = response(chunks=(b"x" * 300_000, b"x" * 200_000, third_read))
+
+                async def answer(url, options):
+                    return served
+                js = self.stub(answer)
+                fault = await self.fault()
+                self.assertEqual((fault.code, fault.message, fault.received),
+                                 ("UNREACHABLE", "Could not reach mad.example.test.", 500_000))
+                self.assertTrue(js.controllers[0].aborted)
+                self.assertEqual(len(js.calls), 1)  # a body that stopped is not probed
+
+    async def test_unexpected_error_after_one_chunk_carries_that_chunk(self):
+        served = response(chunks=(b"x" * 1_234, RuntimeError("JsException: secret internal detail"), b"x" * 10))
+
+        async def answer(url, options):
+            return served
+        self.stub(answer)
+        fault = await self.fault()
+        self.assertEqual((fault.code, fault.message, fault.received),
+                         ("UNREACHABLE", "Could not reach mad.example.test.", 1_234))
+
+    async def test_faults_before_any_body_byte_carry_no_received_bytes(self):
+        def answering(served):
+            async def answer(url, options):
+                return served
+            return answer
+
+        async def unreachable(url, options):
+            raise RuntimeError("TypeError: Failed to fetch")
+
+        async def not_allowed(url, options):
+            if options.mode == "cors":
+                raise RuntimeError("TypeError: Failed to fetch")
+            return types.SimpleNamespace(status=0, type="opaque")
+
+        cases = {
+            "status": (answering(response(status=404, chunks=(b"x" * 500,))), "BAD_SOURCE"),
+            "content type": (answering(response(content_type="text/html", chunks=(b"x" * 500,))), "BAD_SOURCE"),
+            "missing body": (answering(response(body=False)), "BAD_SOURCE"),
+            "unreachable": (unreachable, "UNREACHABLE"),
+            "not readable": (not_allowed, "NOT_READABLE"),
+        }
+        for name, (answer, code) in cases.items():
+            with self.subTest(case=name):
+                self.stub(answer)
+                fault = await self.fault()
+                self.assertEqual((fault.code, fault.received), (code, 0))
+
     async def test_timer_firing_aborts_the_request_and_is_unreachable_without_a_probe(self):
         async def answer(url, options):
             js.fire(0)
@@ -392,6 +471,20 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
         problems = {p["name"]: p["problem"] for p in got["publications"]}
         self.assertEqual(problems, {"class-brick": None, "dropin-class": "mismatch", "member-class": None})
+
+    async def test_read_of_definitions_over_the_file_limit_stops_at_the_byte_budget(self):
+        document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
+
+        async def answer(url, options):
+            if url == URL:
+                return response(chunks=(document,))
+            return response(chunks=(b"x" * 600_000, b"x" * 400_001))  # every definition: 1,000,001 bytes
+        js = self.stub(answer)
+        got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        # Four such files spend the read's 4,000,000 bytes: the other 22 definitions are never requested.
+        self.assertEqual(len(js.calls), 1 + 4)
+        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 3)
+        self.assertEqual(got["checked"], 0)
 
     async def test_read_never_starts_a_fetch_after_sixty_seconds(self):
         files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
