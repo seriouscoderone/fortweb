@@ -111,6 +111,7 @@ ADDRESS = "https://mad.seriouscoder.one/source.json"
 SAID_A = "E" + "A" * 43
 SAID_B = "E" + "B" * 43
 SAID_C = "E" + "C" * 43
+SAID_D = "E" + "D" * 43
 
 
 def _publication(**over):
@@ -471,6 +472,51 @@ class RolesTest(unittest.TestCase):
             "reliesOn": [{"said": SAID_C, "alias": "c", "kind": "fact", "as": "ok"}],
             "attests": [{"said": SAID_C, "alias": "c", "kind": "fact"}],
             "outcome": None}])
+
+    # Names shown, offered as an identifier's name and stored: at most 200 UTF-16 units, no C0/C1 control character.
+    # Otherwise a name is treated as a member of the wrong type.
+
+    def bounded_defs(self, text: str) -> dict:
+        """A selection and an rr in which every displayed string is `text`, plus one rr and one fact named "ok"."""
+        return {
+            SAID_A: {"kind": "selection", "name": text, "alias": text, "rrs": [SAID_B, SAID_D]},
+            SAID_B: {"kind": "rr", "alias": text, "role": text, "outcome": {"said": SAID_C},
+                     "rely_on": [{"said": SAID_C, "as": text}], "attest": [SAID_C]},
+            SAID_C: {"kind": text, "alias": text},
+            SAID_D: {"kind": "rr", "alias": "ok", "role": "ok", "rely_on": [{"said": SAID_C, "as": "ok"}]},
+        }
+
+    def test_names_of_200_units_are_used(self):
+        for text in ("x" * 200, "\U0001F600" * 100, "é" * 200):  # an emoji is two UTF-16 units
+            with self.subTest(units=self.s._units(text)):
+                got = self.s.roles_of_selection(self.bounded_defs(text), SAID_A)
+                ref = {"said": SAID_C, "alias": text, "kind": text}
+                self.assertEqual(got["title"], text)
+                self.assertEqual(self.role(got, text)["responsibilities"], [{
+                    "said": SAID_B, "alias": text, "reliesOn": [dict(ref, **{"as": text})], "attests": [ref],
+                    "outcome": ref}])
+
+    def test_names_over_200_units_or_with_a_control_character_are_not_used(self):
+        for text in ("x" * 201, "\U0001F600" * 100 + "x", "cash\u0000ier", "cash\nier", "cash\u007fier",
+                     "cash\u0085ier", "cash\u009fier"):
+            with self.subTest(text=text[:12], units=self.s._units(text)):
+                got = self.s.roles_of_selection(self.bounded_defs(text), SAID_A)
+                ref = {"said": SAID_C, "alias": "", "kind": ""}
+                self.assertEqual(got["title"], "")
+                # The rr whose role is unusable is ignored; in the other, the unusable "as" drops nothing else.
+                self.assertEqual(got["roles"], [{"role": "ok", "responsibilities": [{
+                    "said": SAID_D, "alias": "ok", "reliesOn": [dict(ref, **{"as": "ok"})], "attests": [],
+                    "outcome": None}]}])
+
+    def test_an_unusable_as_drops_only_that_item(self):
+        defs = self.bounded_defs("ok")
+        defs[SAID_B]["rely_on"] = [{"said": SAID_C, "as": "x" * 201}, {"said": SAID_C, "as": "seat"}]
+        got = self.s.roles_of_selection(defs, SAID_A)
+        self.assertEqual([item["as"] for item in self.role(got, "ok")["responsibilities"][0]["reliesOn"]], ["seat"])
+
+    def test_title_falls_back_to_a_usable_alias(self):
+        selection = {"kind": "selection", "name": "x" * 201, "alias": "class-brick", "rrs": []}
+        self.assertEqual(self.s.roles_of_selection({SAID_A: selection}, SAID_A)["title"], "class-brick")
 
     def test_wrong_typed_lists_ignored(self):
         defs = {

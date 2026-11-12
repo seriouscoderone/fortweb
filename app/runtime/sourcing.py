@@ -315,14 +315,25 @@ def closure(serves: dict, target: str) -> list[str]:
 
 # Roles of a selection. The definition format is a prototype; its reading stays inside roles_of_selection.
 
+DISPLAY_NAME = 200
+
+
+def _display_name(value) -> bool:
+    """A string from a definition that may be shown, offered as an identifier's name and stored."""
+    return _text(value, DISPLAY_NAME)
+
+
 def roles_of_selection(definitions: dict, target: str) -> dict:
     """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
 
-    Anything of the wrong shape is ignored. A referenced SAID with no definition gets alias "" and kind "".
+    Anything of the wrong shape is ignored. A string is used only if it is at most DISPLAY_NAME UTF-16 units and
+    has no C0/C1 control character; any other is treated as a member of the wrong type: an rr whose `role` is not
+    usable is ignored, a `rely_on` item whose `as` is not usable is ignored, and an unusable name, alias or kind is
+    "". A referenced SAID with no definition gets alias "" and kind "".
     """
     def member(obj, name: str) -> str:
         value = obj.get(name) if isinstance(obj, dict) else None
-        return value if isinstance(value, str) else ""
+        return value if _display_name(value) else ""
 
     def ref(said: str) -> dict:
         found = definitions.get(said)
@@ -340,12 +351,12 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     roles: dict[str, list[dict]] = {}
     for said in dict.fromkeys(item for item in selection["rrs"] if is_said(item)):  # once each, first order kept
         rr = definitions.get(said)
-        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not isinstance(rr.get("role"), str):
+        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _display_name(rr.get("role")):
             continue
         relies_on = [
             dict(ref(item["said"]), **{"as": item["as"]})
             for item in items(rr, "rely_on")
-            if isinstance(item, dict) and is_said(item.get("said")) and isinstance(item.get("as"), str)
+            if isinstance(item, dict) and is_said(item.get("said")) and _display_name(item.get("as"))
         ]
         attests = [ref(item) for item in items(rr, "attest") if is_said(item)]
         outcome = rr.get("outcome")
