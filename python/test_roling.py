@@ -182,6 +182,12 @@ class FakeDb:
 
     def __init__(self):
         self.subdbs: dict = {}
+        # fail_write(subkey, keys) -> True makes that write raise StoreWriteError, as a store that cannot write.
+        self.fail_write = lambda subkey, keys: False
+
+
+class StoreWriteError(Exception):
+    pass
 
 
 class FakeKomer:
@@ -195,6 +201,8 @@ class FakeKomer:
     def __init__(self, *, db, subkey, klas):
         if db.closed:
             raise AssertionError("a closed vault was used")
+        self.db = db.db
+        self.subkey = subkey
         self.items = db.db.subdbs.setdefault(subkey, {})
         self.klas = klas
 
@@ -211,6 +219,8 @@ class FakeKomer:
 
     def pin(self, keys, val):
         import dataclasses
+        if self.db.fail_write(self.subkey, self._key(keys)):
+            raise StoreWriteError(f"cannot write in {self.subkey}")
         self.items[self._key(keys)] = json.dumps(dataclasses.asdict(val), separators=(",", ":"),
                                                  ensure_ascii=False).encode("utf-8")
         return True
@@ -238,6 +248,7 @@ class FakeHby:
 
     def __init__(self, db: FakeDb, habs: dict):
         self.closed = False
+        self.make_fails = False
         self._habs = habs
         self.db = types.SimpleNamespace(db=db, closed=False)
 
@@ -256,6 +267,8 @@ class FakeHby:
     def makeHab(self, name, **settings):
         self._check()
         assert settings == {"icount": 1, "isith": "1", "ncount": 1, "nsith": "1"}, settings
+        if self.make_fails:
+            raise RuntimeError("the identifier could not be made")
         pre = f"E{len(self._habs):043d}"
         self._habs[pre] = FakeHab(name, pre)
         return self._habs[pre]
@@ -290,11 +303,14 @@ class FakeVaulting:
             raise RuntimeFault("VALIDATION", f"{field} is required.")
         return text
 
-    def create_identifier(self, hby, alias):
+    def free_alias(self, hby, alias):
         alias = self.require_text(alias, field="Identifier alias")
         if hby.habByName(alias) is not None:
             raise RuntimeFault("CONFLICT", f"Identifier alias '{alias}' already exists.")
-        return hby.makeHab(name=alias, icount=1, isith="1", ncount=1, nsith="1")
+        return alias
+
+    def create_identifier(self, hby, alias):
+        return hby.makeHab(name=self.free_alias(hby, alias), icount=1, isith="1", ncount=1, nsith="1")
 
     def identifier_hab(self, hby, aid):
         hab = hby.habByPre(aid)
@@ -309,7 +325,8 @@ class FakeVaulting:
 class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.roling, self.sourcing = _load_roling()
-        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: None,
+        self.diagnostics = []
+        self.roling.configure_runtime(emit_diagnostic=lambda event, **fields: self.diagnostics.append((event, fields)),
                                       roles_subdb="frol.", role_definitions_subdb="fdef.")
         files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
         document = (FIXTURES / "source.json").read_bytes()
@@ -354,6 +371,64 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
 
     def stored(self, subkey):
         return self.vault.data.subdbs.get(subkey, {})
+
+    def snapshot(self):
+        """Everything the vault holds: the two stores, the identifiers, and how often it was persisted."""
+        return ({subkey: dict(items) for subkey, items in self.vault.data.subdbs.items() if items},
+                {pre: hab.name for pre, hab in self.vault.habs.items()}, self.vault.reloads)
+
+    async def assert_not_kept(self, params, before):
+        """roles.takeOn with `params` fails as a role the wallet could not keep, and leaves the vault as it was."""
+        self.diagnostics.clear()
+        self.assertEqual(await self.fault("roles.takeOn", params),
+                         ("BAD_RESPONSE", "The wallet could not keep that role."))
+        self.assertEqual(self.snapshot(), before)
+        return self.diagnostics
+
+    def params(self, role="instructor", identifier=None, target=DROPIN):
+        return {"vaultId": VAULT, "address": "mad.seriouscoder.one", "target": target, "role": role,
+                "identifier": identifier or {"mode": "new", "alias": "new one"}}
+
+    async def test_a_store_that_cannot_write_leaves_nothing_behind(self):
+        # A role already taken on shares definitions (class-attended) with the one that fails.
+        await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, target=CLASS_BRICK)
+        (pre, _), = self.vault.habs.items()
+        needed = self.roling._needed(DROPIN, self.role_of_read(DROPIN, "instructor"),
+                                     self.roling._LAST_READ["definitions"])
+        shared = {said for said in json.loads(next(iter(self.stored("frol.").values())))["definitions"]}
+        self.assertTrue(shared & set(needed) and set(needed) - shared)
+        before = self.snapshot()
+        cases = {
+            "the first definition": lambda subkey, keys: keys == (needed[0],),
+            "a later definition": lambda subkey, keys: keys == (needed[-1],),
+            "the record": lambda subkey, keys: subkey == "frol.",
+        }
+        for name, fail_write in cases.items():
+            for identifier in ({"mode": "new", "alias": "new one"}, {"mode": "existing", "aid": pre}):
+                with self.subTest(name, mode=identifier["mode"]):
+                    self.vault.data.fail_write = fail_write
+                    diagnostics = await self.assert_not_kept(self.params(identifier=identifier), before)
+                    self.assertEqual(diagnostics, [("role_store_failed",
+                                                    {"level": "error", "exception": "StoreWriteError"})])
+        self.vault.data.fail_write = lambda subkey, keys: False
+        await self.take_on("instructor", {"mode": "existing", "aid": pre})  # the store works again
+
+    async def test_an_identifier_that_cannot_be_made_leaves_nothing_behind(self):
+        await self.take_on("cashier")
+        before = self.snapshot()
+        self.vault.state["hby"].make_fails = True
+        diagnostics = await self.assert_not_kept(self.params(), before)
+        self.assertEqual(diagnostics, [("role_store_failed", {"level": "error", "exception": "RuntimeError"})])
+
+    async def test_a_role_that_cannot_be_stored_as_utf8_leaves_nothing_behind(self):
+        # The reviewer's reproduction at unit level: text with an unpaired surrogate cannot be written as UTF-8.
+        await self.take_on("cashier")
+        before = self.snapshot()
+        dropin = next(p for p in self.roling._LAST_READ["publications"] if p["target"] == DROPIN)
+        dropin["title"] = "Drop-in takes a class \ud83d"
+        diagnostics = await self.assert_not_kept(self.params(), before)
+        self.assertEqual(diagnostics, [("role_store_failed",
+                                        {"level": "error", "exception": "UnicodeEncodeError"})])
 
     async def test_take_on_with_a_new_identifier_stores_the_role_and_its_definitions(self):
         got = await self.take_on("cashier")
@@ -419,6 +494,18 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
                 params.update(change)
                 self.assertEqual(await self.fault("roles.takeOn", params), ("CONFLICT", OPEN_AGAIN))
         self.assertEqual((self.vault.habs, self.stored("frol."), self.vault.reloads), ({}, {}, 0))
+
+    async def test_an_alias_refusal_changes_nothing(self):
+        await self.take_on("cashier")
+        before = self.snapshot()
+        for alias, refusal in (("cashier", ("CONFLICT", "Identifier alias 'cashier' already exists.")),
+                               ("  ", ("VALIDATION", "Identifier alias is required."))):
+            with self.subTest(alias=alias):
+                self.assertEqual(await self.fault("roles.takeOn", {
+                    "vaultId": VAULT, "address": "mad.seriouscoder.one", "target": DROPIN, "role": "instructor",
+                    "identifier": {"mode": "new", "alias": alias}}), refusal)
+                self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.diagnostics, [])
 
     async def test_take_on_with_no_read_or_a_publication_with_a_problem_is_a_conflict(self):
         dropin = next(p for p in self.roling._LAST_READ["publications"] if p["target"] == DROPIN)

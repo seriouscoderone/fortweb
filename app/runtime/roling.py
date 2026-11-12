@@ -316,19 +316,26 @@ def _records(hby) -> list[RoleRecord]:
     return [record for _, record in _roles_store(hby).getTopItemIter()]
 
 
+COULD_NOT_KEEP = "The wallet could not keep that role."
+
+
 async def _roles_take_on(params: dict) -> dict:
+    # 1. Every refusal comes first: nothing has been written when one is raised.
     hby = _open_hby(params)
     read, publication, role = _role_in_last_read(params)
     choice = _identifier_choice(params)
     address = read["source"]["address"]
+    records = _records(hby)
     if choice["mode"] == "existing":
         aid = vaulting.identifier_hab(hby, vaulting.require_text(choice.get("aid"), field="Identifier")).pre
         if any((record.address, record.target, record.role, record.aid) == (address, publication["target"],
                                                                             role["role"], aid)
-               for record in _records(hby)):
+               for record in records):
             raise RuntimeFault("CONFLICT", ALREADY_TAKEN)
+        alias = None
     else:
-        aid = vaulting.create_identifier(hby, choice.get("alias")).pre
+        aid = ""
+        alias = vaulting.free_alias(hby, choice.get("alias"))
 
     definitions = read["definitions"]
     needed = _needed(publication["target"], role, definitions)
@@ -338,12 +345,37 @@ async def _roles_take_on(params: dict) -> dict:
         responsibilities=[item["said"] for item in role["responsibilities"]], definitions=needed, aid=aid,
         taken_at=_now(),
     )
+    roles = _roles_store(hby)
     stored = _definitions_store(hby)
-    for said in needed:
-        stored.pin(keys=(said,), val=DefinitionRecord(said=said, text=definitions[said]))
-    _roles_store(hby).pin(keys=(record.id,), val=record)
+    listed = {said for other in records for said in other.definitions}
+    try:
+        # 2. The role's data is written, and so proven storable, before any identifier is made.
+        for said in needed:
+            stored.pin(keys=(said,), val=DefinitionRecord(said=said, text=definitions[said]))
+        roles.pin(keys=(record.id,), val=record)
+        if alias is not None:
+            # 3. The identifier is made; 4. the record is completed with it.
+            record.aid = vaulting.create_identifier(hby, alias).pre
+            roles.pin(keys=(record.id,), val=record)
+    except Exception as error:
+        _forget_role(roles, stored, record, [said for said in needed if said not in listed])
+        _diagnose("role_store_failed", level="error", exception=type(error).__name__)
+        raise RuntimeFault("BAD_RESPONSE", COULD_NOT_KEEP) from None
+    # 5. Known limit: a persist writes one store after another, so a persist that is interrupted can still leave an
+    # identifier without the role, or a role without its definitions (roles.list lists it with no responsibilities).
     reopened = await vaulting.persist_and_reload()
     return {"role": _role_view(reopened["hby"], record)}
+
+
+def _forget_role(roles, stored, record: RoleRecord, added: list[str]) -> None:
+    """Removes what a take-on that failed had written: its record and the definitions no other record lists. A
+    removal that fails is reported (the class of its error only) and the others are still made."""
+    removals = [(roles, (record.id,))] + [(stored, (said,)) for said in added]
+    for store, keys in removals:
+        try:
+            store.rem(keys=keys)
+        except Exception as error:
+            _diagnose("role_store_cleanup_failed", level="error", exception=type(error).__name__)
 
 
 async def _roles_list(params: dict) -> dict:
