@@ -240,7 +240,8 @@ test.describe('Taking on a role', () => {
             // The answer cannot arrive within this one task: the dialog is closed while the request is open.
             await page.evaluate(() => {
                 (document.querySelector('[role="dialog"] [data-action="submit"]') as HTMLButtonElement).click();
-                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+                document.dispatchEvent(
+                    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
             });
             await expect(dialog.dialog).toHaveCount(0);
             const message = 'Identifier alias \'cashier\' already exists.';
@@ -253,18 +254,33 @@ test.describe('Taking on a role', () => {
         await routeFixtureSource(context);
         await setUpWallet(page);
         await showDropinRoles(page);
-        const dialog = await startTakingOn(page, 'cashier');
-        await dialog.dialog.evaluate((root) => {
-            const buttons = Array.from(root.querySelectorAll('button[data-action]')) as HTMLButtonElement[];
+        /** From now on, the disabled state of [Cancel, Take on] at every change, in the open dialog. */
+        const watchButtons = (root: ReturnType<typeof takeOnDialog>['dialog']) => root.evaluate((dialog) => {
+            const buttons = Array.from(dialog.querySelectorAll('button[data-action]')) as HTMLButtonElement[];
             const seen: boolean[][] = [];
             (window as unknown as { takeOnButtonsSeen: boolean[][] }).takeOnButtonsSeen = seen;
             new MutationObserver(() => seen.push(buttons.map((button) => button.disabled)))
-                .observe(root, { subtree: true, attributes: true, attributeFilter: ['disabled'] });
+                .observe(dialog, { subtree: true, attributes: true, attributeFilter: ['disabled'] });
         });
+        const seen = () => page.evaluate(
+            () => (window as unknown as { takeOnButtonsSeen: boolean[][] }).takeOnButtonsSeen);
+
+        // Until the answer arrives, and as the dialog closes on success, both stay disabled.
+        let dialog = await startTakingOn(page, 'cashier');
+        await watchButtons(dialog.dialog);
         await dialog.takeOn.click();
         await expect(myRoles(page).item('cashier')).toHaveCount(1, { timeout: 90_000 });
-        const seen = await page.evaluate(() => (window as unknown as { takeOnButtonsSeen: boolean[][] }).takeOnButtonsSeen);
-        expect(seen[0]).toEqual([true, true]);
+        expect(await seen()).toEqual([[true, true]]);
+
+        // After an error both are enabled again, and not before.
+        dialog = await startTakingOn(page, 'instructor');
+        await dialog.name.fill('cashier');
+        await watchButtons(dialog.dialog);
+        await dialog.takeOn.click();
+        await expect(dialog.status).toHaveText('Identifier alias \'cashier\' already exists.', { timeout: 90_000 });
+        expect(await seen()).toEqual([[true, true], [false, false]]);
+        await expect(dialog.takeOn).toBeEnabled();
+        await expect(dialog.cancel).toBeEnabled();
     });
 
     test('after the runtime is discarded in the background, taking on a role needs the address opened again',
