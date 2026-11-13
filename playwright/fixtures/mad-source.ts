@@ -11,11 +11,14 @@ const FIXTURES = path.join(REPO, 'python', 'fixtures', 'mad');
 const LIVE_SOURCE = 'https://mad.seriouscoder.one/source.json';
 export const FIXTURE_HOST = 'mad.example.test';
 export const FIXTURE_SOURCE = `https://${FIXTURE_HOST}/source.json`;
+const NOT_THE_WALLET = 'https://not-the-wallet.example.test';
 const DEFINITION_PATH = /^\/definitions\/(E[A-Za-z0-9_-]{43})\.json$/;
 
 export interface FixtureSourceOptions {
     /** false: answer without allowing the wallet's origin, so the wallet may not read it. */
     cors?: boolean;
+    /** false: answer the definitions (only) without allowing the wallet's origin. */
+    definitionsCors?: boolean;
     /** Serve this definition with one byte changed. */
     tamper?: string;
     /** Serve a source document of 1,000,001 bytes. */
@@ -92,7 +95,7 @@ export async function routeFixtureSource(
     // answered with an origin that is not the wallet's: to the browser that is the same refusal.
     const headers: Record<string, string> = {
         'content-type': 'application/json',
-        'access-control-allow-origin': options.cors === false ? 'https://not-the-wallet.example.test' : '*',
+        'access-control-allow-origin': options.cors === false ? NOT_THE_WALLET : '*',
     };
     await context.route(`https://${FIXTURE_HOST}/**`, async (route) => {
         const { pathname } = new URL(route.request().url());
@@ -122,7 +125,9 @@ export async function routeFixtureSource(
             await route.fulfill({ status: 404, headers, body: '' });
             return;
         }
-        await route.fulfill({ status: 200, headers, body: options.oversizeDefinitions ? oversized(body) : body });
+        const refused = options.definitionsCors === false ? { 'access-control-allow-origin': NOT_THE_WALLET } : {};
+        await route.fulfill({ status: 200, headers: { ...headers, ...refused },
+            body: options.oversizeDefinitions ? oversized(body) : body });
     });
     return requests;
 }

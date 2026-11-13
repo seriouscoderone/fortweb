@@ -880,7 +880,8 @@ class ReadSourceTest(unittest.TestCase):
 
         async def refuse(url, timeout_ms):
             calls.append(url)
-            raise self.s.SourceFault("NOT_READABLE", "mad.seriouscoder.one does not allow wallets to read it yet.")
+            raise self.s.SourceFault("NOT_READABLE", "Could not read mad.seriouscoder.one: it cannot be reached, or it "
+                                                     "does not allow wallets to read it yet.")
         with self.assertRaises(self.s.SourceFault) as raised:
             asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=refuse, digest=digest, clock=Clock()))
         self.assertEqual(raised.exception.code, "NOT_READABLE")

@@ -102,7 +102,8 @@ class SourcesReadTest(unittest.IsolatedAsyncioTestCase):
     async def test_fault_codes_map_to_runtime_codes(self):
         cases = [
             ("UNREACHABLE", "Could not reach mad.seriouscoder.one.", "NETWORK_ERROR"),
-            ("NOT_READABLE", "mad.seriouscoder.one does not allow wallets to read it yet.", "NETWORK_ERROR"),
+            ("NOT_READABLE", "Could not read mad.seriouscoder.one: it cannot be reached, or it does not allow wallets "
+             "to read it yet.", "NETWORK_ERROR"),
             ("TOO_MUCH", "mad.seriouscoder.one publishes more than the wallet reads in one go.", "BAD_RESPONSE"),
             ("BAD_SOURCE", "mad.seriouscoder.one did not return a valid source.", "BAD_RESPONSE"),
         ]
@@ -726,6 +727,8 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
 
 
 URL = "https://mad.example.test/source.json"
+NOT_READABLE_SENTENCE = ("Could not read mad.example.test: it cannot be reached, or it does not allow wallets to read "
+                         "it yet.")
 
 
 class Timer:
@@ -788,15 +791,9 @@ def answering(make):
 
 
 async def unreachable(url, options):
-    """An `answer` for StubJs: every fetch is rejected, the probe too."""
+    """An `answer` for StubJs: every fetch is rejected before its time runs out (a host that cannot be reached, or
+    one that does not allow the read: a browser does not say which)."""
     raise RuntimeError("TypeError: Failed to fetch")
-
-
-async def not_allowed(url, options):
-    """An `answer` for StubJs: the read is rejected and the probe is answered."""
-    if options.mode == "cors":
-        raise RuntimeError("TypeError: Failed to fetch")
-    return types.SimpleNamespace(status=0, type="opaque")
 
 
 class StubJs:
@@ -954,7 +951,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((fault.code, fault.message, fault.received),
                                  ("UNREACHABLE", "Could not reach mad.example.test.", 500_000))
                 self.assertTrue(js.controllers[0].aborted)
-                self.assertEqual(len(js.calls), 1)  # a body that stopped is not probed
+                self.assertEqual(len(js.calls), 1)  # a body that stopped is not asked for again
 
     async def test_unexpected_error_after_one_chunk_carries_that_chunk(self):
         served = response(chunks=(b"x" * 1_234, RuntimeError("JsException: secret internal detail"), b"x" * 10))
@@ -971,8 +968,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
             "status": (answering(lambda: response(status=404, chunks=(b"x" * 500,))), "BAD_SOURCE"),
             "content type": (answering(lambda: response(content_type="text/html", chunks=(b"x" * 500,))), "BAD_SOURCE"),
             "missing body": (answering(lambda: response(body=False)), "BAD_SOURCE"),
-            "unreachable": (unreachable, "UNREACHABLE"),
-            "not readable": (not_allowed, "NOT_READABLE"),
+            "rejected": (unreachable, "NOT_READABLE"),
         }
         for name, (answer, code) in cases.items():
             with self.subTest(case=name):
@@ -980,7 +976,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                 fault = await self.fault()
                 self.assertEqual((fault.code, fault.received), (code, 0))
 
-    async def test_timer_firing_aborts_the_request_and_is_unreachable_without_a_probe(self):
+    async def test_timer_firing_aborts_the_request_and_is_unreachable(self):
         async def answer(url, options):
             js.fire(0)
             raise RuntimeError("AbortError: signal is aborted without reason")
@@ -990,41 +986,81 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(js.controllers[0].aborted)
         self.assertEqual(len(js.calls), 1)
 
-    async def test_rejected_read_is_told_apart_by_a_probe(self):
-        async def answer(url, options):
-            if options.mode == "cors":
-                raise RuntimeError("TypeError: Failed to fetch")
-            return types.SimpleNamespace(status=0, type="opaque")
-        js = self.stub(answer)
-        fault = await self.fault()
-        self.assertEqual((fault.code, fault.message),
-                         ("NOT_READABLE", "mad.example.test does not allow wallets to read it yet."))
-        self.assertEqual([options.mode for _, options, _ in js.calls], ["cors", "no-cors"])
-
-    async def test_probe_has_its_own_short_budget(self):
-        async def answer(url, options):
-            if options.mode == "cors":
-                raise RuntimeError("TypeError: Failed to fetch")
-            return types.SimpleNamespace(status=0, type="opaque")
-        js = self.stub(answer)
-        await self.fault(timeout_ms=10_000)
-        self.assertEqual(self.roling.PROBE_MS, 3_000)
-        self.assertEqual([t.ms for t in js.timers], [10_000, 3_000])
+    async def test_a_rejected_read_is_not_readable_and_asked_once(self):
+        js = self.stub(unreachable)
+        fault = await self.fault(timeout_ms=10_000)
+        self.assertEqual((fault.code, fault.message), ("NOT_READABLE", NOT_READABLE_SENTENCE))
+        self.assertEqual(len(js.calls), 1)
         self.assertTrue(all(t.cleared for t in js.timers))
 
-    async def test_probe_is_aborted_once_it_settles(self):
-        for probe_resolves in (True, False):
-            with self.subTest(probe_resolves=probe_resolves):
-                async def answer(url, options):
-                    if options.mode == "cors" or not probe_resolves:
-                        raise RuntimeError("TypeError: Failed to fetch")
-                    return types.SimpleNamespace(status=0, type="opaque")
-                js = self.stub(answer)
-                await self.fault()
-                self.assertEqual(len(js.controllers), 2)
-                self.assertTrue(js.controllers[1].aborted)
+    def assert_only_reads(self, js: StubJs, document: bytes):
+        """Every fetch is a cors GET with the six fixed options, to the source or one of its definitions, and no
+        address is asked twice."""
+        serves = json.loads(document)["serves"]
+        allowed = {URL} | {f"https://mad.example.test/definitions/{item['said']}.json" for item in serves}
+        urls = [url for url, _, _ in js.calls]
+        self.assertTrue(urls)
+        self.assertEqual(sorted(set(urls) - allowed), [])
+        self.assertEqual(len(urls), len(set(urls)), urls)
+        for url, options, _ in js.calls:
+            self.assertEqual({name: value for name, value in vars(options).items() if name != "signal"},
+                             {"method": "GET", "mode": "cors", "credentials": "omit", "redirect": "error",
+                              "referrerPolicy": "no-referrer", "cache": "no-store"}, url)
 
-    async def test_read_rejected_after_its_time_is_not_probed(self):
+    def fixture_answer(self, rejected=lambda url: False):
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
+
+        async def answer(url, options):
+            if rejected(url):
+                raise RuntimeError("TypeError: Failed to fetch")
+            if url == URL:
+                return response(chunks=(document,))
+            return response(chunks=(files[url.rsplit("/", 1)[1][:-len(".json")]],))
+        return answer, document
+
+    async def test_a_whole_read_asks_only_for_the_source_and_its_definitions_once_each(self):
+        answer, document = self.fixture_answer()
+        js = self.stub(answer)
+        got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual(got["checked"], 26)
+        self.assertEqual(len(js.calls), 1 + 26)
+        self.assert_only_reads(js, document)
+
+    async def test_a_rejected_source_document_makes_no_second_request(self):
+        answer, document = self.fixture_answer(rejected=lambda url: url == URL)
+        js = self.stub(answer)
+        with self.assertRaises(RuntimeFault) as raised:
+            await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual((raised.exception.code, str(raised.exception)), ("NETWORK_ERROR", NOT_READABLE_SENTENCE))
+        self.assertEqual([url for url, _, _ in js.calls], [URL])
+        self.assert_only_reads(js, document)
+
+    async def test_a_source_document_whose_time_runs_out_could_not_be_reached(self):
+        async def answer(url, options):
+            js.fire(0)
+            raise RuntimeError("AbortError: signal is aborted without reason")
+        js = self.stub(answer)
+        with self.assertRaises(RuntimeFault) as raised:
+            await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual((raised.exception.code, str(raised.exception)),
+                         ("NETWORK_ERROR", "Could not reach mad.example.test."))
+        self.assertEqual(len(js.calls), 1)
+
+    async def test_a_rejected_definition_makes_no_second_request(self):
+        paid_admission = "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U"  # only dropin-class uses it
+        answer, document = self.fixture_answer(rejected=lambda url: paid_admission in url)
+        js = self.stub(answer)
+        got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual(got["checked"], 25)
+        self.assertEqual(len(js.calls), 1 + 26)
+        self.assert_only_reads(js, document)
+
+    def test_the_probe_is_gone(self):
+        self.assertFalse(hasattr(self.roling, "PROBE_MS"))
+        self.assertFalse(hasattr(self.roling, "_probe"))
+
+    async def test_read_rejected_after_its_time_is_unreachable(self):
         async def answer(url, options):
             js.now += 10_000  # rejected just as the request's time ran out, before its timer was run
             raise RuntimeError("TypeError: Failed to fetch")
@@ -1083,8 +1119,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
             "status": (answering(lambda: response(status=404)), "BAD_SOURCE"),
             "content type": (answering(lambda: response(content_type="text/html")), "BAD_SOURCE"),
             "too much": (answering(lambda: response(chunks=(b"x" * 1_000_001,))), "TOO_MUCH"),
-            "unreachable": (unreachable, "UNREACHABLE"),
-            "not readable": (not_allowed, "NOT_READABLE"),
+            "rejected": (unreachable, "NOT_READABLE"),
             "body stops midway": (answering(lambda: response(chunks=(b"x" * 10, dropped))), "UNREACHABLE"),
         }
         for name, (answer, code) in cases.items():
@@ -1149,11 +1184,11 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
 
         async def answer(url, options):
-            js.now += 4_000 if options.mode == "cors" else 0
+            js.now += 4_000
             if url == URL:
                 return response(chunks=(document,))
             if len(js.calls) % 3 == 0:
-                raise RuntimeError("TypeError: Failed to fetch")  # probed; the probe answers at once
+                raise RuntimeError("TypeError: Failed to fetch")
             return response(chunks=(files[url.rsplit("/", 1)[1][:-len(".json")]],))
         js = self.stub(answer)
         js.now = 50_000.0
@@ -1163,7 +1198,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                          ("NETWORK_ERROR", "Could not reach mad.example.test."))
         self.assertTrue(js.calls)
         self.assertTrue(all(at < 50_000 + 60_000 for _, _, at in js.calls), [at for _, _, at in js.calls])
-        self.assertEqual(sum(1 for _, options, _ in js.calls if options.mode == "cors"), 15)
+        self.assertEqual(len(js.calls), 15)
 
 
 class WorkerDiagnosticTest(unittest.IsolatedAsyncioTestCase):

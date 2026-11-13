@@ -31,10 +31,6 @@ FAULT_CODES = {
     "TOO_MUCH": "BAD_RESPONSE",
 }
 
-# A no-cors probe only tells "cannot be reached" from "does not allow the read"; it gets this fixed budget,
-# whatever the request's own timeout.
-PROBE_MS = 3_000
-
 _CONFIG: dict = {}
 
 
@@ -75,21 +71,21 @@ async def _settle(value):
     return await value if isawaitable(value) else value
 
 
-def _options(mode: str, signal):
+def _options(signal):
+    """The only options the wallet reads a source with. It makes no other kind of request: one that could tell an
+    unreachable host from one that does not allow the read (no-cors) cannot refuse redirects."""
     options = js.Object.new()
     options.method = "GET"
-    options.mode = mode
+    options.mode = "cors"
     options.credentials = "omit"
-    # The read refuses redirects. The no-cors probe cannot: a browser fails a no-cors fetch whose redirect mode is
-    # not "follow" before sending it. The probe's opaque answer is never read; it only shows that the host answered.
-    options.redirect = "error" if mode == "cors" else "follow"
+    options.redirect = "error"
     options.referrerPolicy = "no-referrer"
     options.cache = "no-store"
     options.signal = signal
     return options
 
 
-async def _fetch_or_none(url: str, mode: str, timeout_ms: int):
+async def _fetch_or_none(url: str, timeout_ms: int):
     """The response, or None when the fetch rejected; also whether the timeout fired. Clears its timer on rejection."""
     controller = js.AbortController.new()
     fired = []
@@ -100,7 +96,7 @@ async def _fetch_or_none(url: str, mode: str, timeout_ms: int):
 
     timer = js.setTimeout(_abort, max(1, int(timeout_ms)))
     try:
-        return await _settle(js.fetch(url, _options(mode, controller.signal))), controller, timer, fired
+        return await _settle(js.fetch(url, _options(controller.signal))), controller, timer, fired
     except Exception:
         js.clearTimeout(timer)
         return None, controller, None, fired
@@ -111,15 +107,6 @@ def _abort_quietly(controller) -> None:
         controller.abort()
     except Exception:
         pass
-
-
-async def _probe(url: str) -> bool:
-    """Whether a no-cors request to `url` is answered within PROBE_MS. Its opaque body is never read: once the probe
-    settles its controller is aborted, so nothing keeps streaming."""
-    probe, controller, timer, _ = await _fetch_or_none(url, "no-cors", PROBE_MS)
-    js.clearTimeout(timer)
-    _abort_quietly(controller)
-    return probe is not None
 
 
 class _BodyCount:
@@ -152,15 +139,14 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
 
 async def _fetch_checked(url: str, timeout_ms: int, host: str, count: _BodyCount) -> bytes:
     started = _clock()
-    response, controller, timer, fired = await _fetch_or_none(url, "cors", timeout_ms)
+    response, controller, timer, fired = await _fetch_or_none(url, timeout_ms)
     if response is None:
         if fired or _clock() - started >= timeout_ms:
             raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.")
-        # A rejected cors fetch is either a host that cannot be reached or one that does not allow the read.
-        # A no-cors probe tells them apart.
-        if not await _probe(url):
-            raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.")
-        raise sourcing.SourceFault("NOT_READABLE", f"{host} does not allow wallets to read it yet.")
+        # A browser does not say why a cors fetch was rejected: the host cannot be reached, or it does not allow the
+        # read. The wallet does not ask again in another way to find out.
+        raise sourcing.SourceFault(
+            "NOT_READABLE", f"Could not read {host}: it cannot be reached, or it does not allow wallets to read it yet.")
     try:
         content_type = str(response.headers.get("content-type") or "").lower()
         if int(response.status) != 200 or not content_type.startswith("application/json") or response.body is None:

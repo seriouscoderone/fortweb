@@ -115,9 +115,10 @@ test.describe('Roles page', () => {
         const cases: Array<[string, (() => Promise<unknown>) | null, string]> = [
             ['http://x', null, NOT_AN_ADDRESS],
             [FIXTURE_HOST, () => routeFixtureSource(context, { cors: false }),
-                'mad.example.test does not allow wallets to read it yet.'],
+                'Could not read mad.example.test: it cannot be reached, or it does not allow wallets to read it yet.'],
             ['down.example.test', () => context.route('https://down.example.test/**',
-                (route) => route.abort('connectionrefused')), 'Could not reach down.example.test.'],
+                (route) => route.abort('connectionrefused')),
+            'Could not read down.example.test: it cannot be reached, or it does not allow wallets to read it yet.'],
             [FIXTURE_HOST, () => routeFixtureSource(context, { sourceAnswer: 'missing' }),
                 'mad.example.test did not return a valid source.'],
             [FIXTURE_HOST, () => routeFixtureSource(context, { oversize: true }),

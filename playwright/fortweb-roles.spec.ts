@@ -8,6 +8,8 @@ import {
 // sources.read against the real runtime. The fixture source is answered by context.route; the runtime is called
 // through a bridge made the way app/app/main.ts makes its own (same module, worker and config URLs).
 
+const NOT_READABLE = 'Could not read mad.example.test: it cannot be reached, or it does not allow wallets to read it yet.';
+
 test.describe('sources.read', () => {
     test.setTimeout(480_000);
 
@@ -56,8 +58,21 @@ test.describe('sources.read', () => {
         await routeFixtureSource(context, { cors: false });
         await setUpWallet(page);
         expect(await readSource(page, FIXTURE_HOST)).toEqual({
-            ok: false, code: 'NETWORK_ERROR', message: 'mad.example.test does not allow wallets to read it yet.',
+            ok: false, code: 'NETWORK_ERROR', message: NOT_READABLE,
         });
+    });
+
+    test('definitions that may not be read are each asked for once', async ({ context, page }) => {
+        const requests = await routeFixtureSource(context, { definitionsCors: false });
+        await openStartPage(page);
+        const outcome = await readSource(page, FIXTURE_HOST);
+        expect(outcome.ok && outcome.result.checked).toBe(0);
+        expect(outcome.ok && outcome.result.publications.map((p) => [p.name, p.problem, p.roles])).toEqual([
+            ['class-brick', 'mismatch', []], ['dropin-class', 'mismatch', []], ['member-class', 'mismatch', []],
+        ]);
+        // Every definition the publications need (all 26 the source serves), each exactly once.
+        expect(requests.definitions.length).toBe(26);
+        expect(new Set(requests.definitions).size).toBe(26);
     });
 
     test('a tampered definition marks exactly the publications that use it', async ({ context, page }) => {
@@ -109,11 +124,9 @@ test.describe('sources.read', () => {
     for (const [answer, code, message] of [
         ['missing', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
         ['html', 'BAD_RESPONSE', 'mad.example.test did not return a valid source.'],
-        // The read refuses redirects. A redirect answered by route.fulfill cannot be followed by any fetch in Chromium
-        // (checked: cors and no-cors, same-host and other-host targets, the target is never requested), so the
-        // no-cors probe fails as well and the host counts as unreachable. A real server's redirect is followed by the
-        // probe and gives "does not allow wallets to read it yet" (a known, accepted limitation).
-        ['redirect', 'NETWORK_ERROR', 'Could not reach mad.example.test.'],
+        // The read refuses redirects, so its fetch is rejected; a browser does not say why, and the wallet asks
+        // nothing more (a request that could tell would follow the redirect): the one sentence for a rejected read.
+        ['redirect', 'NETWORK_ERROR', NOT_READABLE],
     ] as const) {
         test(`a source that answers ${answer === 'missing' ? '404' : answer === 'html' ? '200 text/html' : '302'}`,
             async ({ context, page }) => {
@@ -127,7 +140,8 @@ test.describe('sources.read', () => {
         await context.route('https://down.example.test/**', (route) => route.abort('connectionrefused'));
         await setUpWallet(page);
         expect(await readSource(page, 'down.example.test')).toEqual({
-            ok: false, code: 'NETWORK_ERROR', message: 'Could not reach down.example.test.',
+            ok: false, code: 'NETWORK_ERROR',
+            message: 'Could not read down.example.test: it cannot be reached, or it does not allow wallets to read it yet.',
         });
     });
 
