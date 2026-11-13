@@ -3,7 +3,7 @@ import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     DROPIN_CLASS, setUpWallet, startRequest, finishRequest, rolesPage, NOT_APPOINTED_SENTENCE, OPEN_AGAIN,
     editSource, openAddress, takeOnDialog, ALREADY_TAKEN, CASHIER_DUTIES, showDropinRoles, myRoles, startTakingOn,
-    takeOnWithNewIdentifier, unlock, sendToBackgroundFor31Seconds,
+    takeOnWithNewIdentifier, unlock, sendToBackgroundFor31Seconds, expectFrom,
 } from './fixtures/roles.js';
 
 // Taking on a role and My roles.
@@ -26,7 +26,7 @@ test.describe('Taking on a role', () => {
         const mine = myRoles(page);
         await expect(mine.items).toHaveCount(1);
         const cashier = mine.item('cashier');
-        await expect(cashier.getByText('dropin-class at mad.example.test', { exact: true })).toBeVisible();
+        await expectFrom(cashier, 'dropin-class');
         await expect(cashier.getByText('Identifier: cashier', { exact: true })).toBeVisible();
         await expect(cashier.getByText('Not appointed yet', { exact: true })).toBeVisible();
         await expect(cashier.getByText(NOT_APPOINTED_SENTENCE, { exact: true })).toBeVisible();
@@ -124,8 +124,7 @@ test.describe('Taking on a role', () => {
             const dialog = takeOnDialog(page, 'cashier');
             await dialog.takeOn.click();
             await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
-            await expect(myRoles(page).item('cashier').getByText('dropin-again at mad.example.test', { exact: true }))
-                .toBeVisible();
+            await expectFrom(myRoles(page).item('cashier'), 'dropin-again');
         });
 
     test('after the runtime is discarded in the background, taking on a role needs the address opened again',

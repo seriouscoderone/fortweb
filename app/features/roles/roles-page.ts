@@ -231,12 +231,16 @@ function dutiesList(responsibilities: Responsibility[], className: string): HTML
     return duties;
 }
 
-/** The role's name, numbered when an identifier of the vault already has it: cashier, cashier 2, cashier 3... */
+/**
+ * The role's name with its white space tidied (none at either end, one space for each run inside), numbered when an
+ * identifier of the vault already has it: cashier, cashier 2, cashier 3...
+ */
 function freeAlias(role: string, identifiers: VaultIdentifier[]): string {
     const taken = new Set(identifiers.map((identifier) => identifier.alias));
-    let alias = role;
+    const name = role.trim().replace(/\s+/gu, " ");
+    let alias = name;
     for (let number = 2; taken.has(alias); number += 1) {
-        alias = `${role} ${number}`;
+        alias = `${name} ${number}`;
     }
     return alias;
 }
@@ -557,9 +561,11 @@ function takenRoleItem(role: TakenRole, onRemove: RolesPageProps["onRemove"], st
     item.dataset.myRole = role.id;
     const heading = element("h3", role.role);
     heading.tabIndex = -1;
+    // The host has a line of its own, before any text from the source, so a name cannot hide or imitate it.
     item.append(
         heading,
-        element("p", `${role.publication} at ${role.host}`, "muted"),
+        element("p", `From ${role.host}`, "muted"),
+        element("p", role.publication, "muted"),
         element("p", `Identifier: ${role.identifierAlias || role.aid}`),
     );
     for (const warning of role.warnings) {

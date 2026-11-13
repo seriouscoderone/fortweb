@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     setUpWallet, heldSource, rolesPage, openAddress, showDropinRoles, unlock, closePhoneMenu, myRoles,
-    takeOnWithNewIdentifier,
+    takeOnWithNewIdentifier, expectFrom,
 } from './fixtures/roles.js';
 
 // The last read kept by the app.
@@ -85,8 +85,7 @@ test.describe('The last read', () => {
         await expect(roles.cards).toHaveCount(3);
         await expect(roles.card('dropin-class').getByRole('button', { name: 'Hide roles' })).toBeVisible();
         await takeOnWithNewIdentifier(page, 'cashier');
-        await expect(myRoles(page).item('cashier').getByText('dropin-class at mad.example.test', { exact: true }))
-            .toBeVisible();
+        await expectFrom(myRoles(page).item('cashier'), 'dropin-class');
     });
 
     test('a read that finishes after leaving the page announces nothing and is there on coming back',

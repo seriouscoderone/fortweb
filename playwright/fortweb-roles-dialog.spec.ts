@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { routeFixtureSource } from './fixtures/mad-source.js';
+import { definition, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     setUpWallet, rolesPage, takeOnDialog, showDropinRoles, myRoles, startTakingOn, takeOnWithNewIdentifier,
-    recordAnnouncements, announced, watchRuntimeRequests,
+    recordAnnouncements, announced, watchRuntimeRequests, editSource,
 } from './fixtures/roles.js';
 
 // The dialog that takes on a role.
@@ -53,6 +53,27 @@ test.describe('The take-on dialog', () => {
         await expect(dialog.createNew).toBeChecked();
         await expect(dialog.selectExisting).not.toBeChecked();
         await expect(dialog.name).toHaveValue('cashier 2');
+    });
+
+    test('the name offered is the role\'s with its white space tidied, numbered on that form', async ({ context, page }) => {
+        // A publication whose one role is "cashier" followed by a no-break space.
+        const [rr, rrBytes] = definition({ kind: 'rr', alias: 'till', role: 'cashier\u00a0' });
+        const [selection, selectionBytes] = definition({ kind: 'selection', name: 'Spaced', rrs: [rr] });
+        await routeFixtureSource(context, {
+            extra: new Map([[rr, rrBytes], [selection, selectionBytes]]),
+            edit: editSource((document) => {
+                document.serves.push({ said: selection, refers: [rr] }, { said: rr, refers: [] });
+                document.publications.push({ ...document.publications[1], target: selection, name: 'spaced' });
+            }),
+        });
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        const spaced = rolesPage(page).card('spaced');
+        await spaced.getByRole('button', { name: 'Show roles' }).click();
+        await spaced.locator('[data-roles-list] button').click();
+        const dialog = page.locator('[role="dialog"]:not([inert])');
+        await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('cashier 2');
     });
 
     test('an identifier name that is taken is shown in the dialog, which stays open', async ({ context, page }) => {

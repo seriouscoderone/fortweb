@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { FIXTURE_HOST } from './mad-source.js';
 
 // Helpers shared by the Roles specs (fortweb-roles*.spec.ts).
@@ -177,6 +177,22 @@ export function myRoles(page: Page) {
         item: (role: string) => region.getByRole('listitem')
             .filter({ has: page.getByRole('heading', { level: 3, name: role, exact: true }) }),
     };
+}
+
+/**
+ * A role under My roles says where it came from on lines of its own: "From <host>" first, then the publication's
+ * name alone, then the identifier. No element's own text holds both the host and the publication's name.
+ */
+export async function expectFrom(item: Locator, publication: string, host = FIXTURE_HOST): Promise<void> {
+    const lines = item.locator(':scope > p');
+    await expect(lines.nth(0)).toHaveText(`From ${host}`);
+    await expect(lines.nth(1)).toHaveText(publication);
+    await expect(lines.nth(2)).toHaveText(/^Identifier: /);
+    expect(await item.evaluate((root, [name, from]) => Array.from(root.querySelectorAll('*')).filter((node) => {
+        const own = Array.from(node.childNodes).filter((child) => child.nodeType === Node.TEXT_NODE)
+            .map((child) => child.textContent ?? '').join('');
+        return own.includes(name) && own.includes(from);
+    }).length, [publication, host] as const)).toBe(0);
 }
 
 export function takeOnDialog(page: Page, role: string) {
