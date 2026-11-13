@@ -72,6 +72,44 @@ test.describe('Taking on a role', () => {
             await expect(myRoles(page).item('cashier')).toHaveCount(1);
         });
 
+    test('a refresh that fails after the role was taken on is not shown as a failed take-on', async ({ context, page }) => {
+        // The page's next vaults.summary request is changed, on its way to the runtime, into a method the runtime does
+        // not have, so the runtime answers it with an error.
+        await page.addInitScript(() => {
+            const holder = window as unknown as { breakSummary: boolean; summaryBroken: number };
+            holder.breakSummary = false;
+            holder.summaryBroken = 0;
+            const post = MessagePort.prototype.postMessage as (this: MessagePort, ...args: unknown[]) => void;
+            MessagePort.prototype.postMessage = function (this: MessagePort, ...args: unknown[]): void {
+                const message = args[0];
+                if (holder.breakSummary && Array.isArray(message) && message[1] === 'handle_request'
+                    && Array.isArray(message[2]) && typeof message[2][0] === 'string') {
+                    try {
+                        const request = JSON.parse(message[2][0]) as { method?: string };
+                        if (request.method === 'vaults.summary') {
+                            holder.breakSummary = false;
+                            holder.summaryBroken += 1;
+                            message[2][0] = JSON.stringify({ ...request, method: 'vaults.summaryBroken' });
+                        }
+                    } catch {
+                        // not a request
+                    }
+                }
+                post.apply(this, args);
+            };
+        });
+        await routeFixtureSource(context);
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        const dialog = await startTakingOn(page, 'cashier');
+        await page.evaluate(() => { (window as unknown as { breakSummary: boolean }).breakSummary = true; });
+        await dialog.takeOn.click();
+        await expect(dialog.dialog).toHaveCount(0, { timeout: 90_000 });
+        await expect(myRoles(page).item('cashier')).toHaveCount(1);
+        expect(await page.evaluate(() => (window as unknown as { summaryBroken: number }).summaryBroken)).toBe(1);
+        await expect(rolesPage(page).status).toHaveText('');
+    });
+
     test('no request leaves the page while taking on a role', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);

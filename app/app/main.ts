@@ -489,9 +489,14 @@ actions = {
         const vaultId = requireUnlockedVaultId();
         const { role } = await bridge.request<{ role: TakenRole }>(METHODS.rolesTakeOn, { vaultId, ...request });
         if (request.identifier.mode === "new") {
-            const { vault } = await bridge.request<{ vault: VaultSummary }>(METHODS.vaultsSummary, { vaultId });
-            session.patch({ vaultSummary: vault });
-            await actions.refreshVaults(vaultId, vault);
+            // The role is taken on: a refresh that fails now is logged, not shown as a failed take-on.
+            try {
+                const { vault } = await bridge.request<{ vault: VaultSummary }>(METHODS.vaultsSummary, { vaultId });
+                session.patch({ vaultSummary: vault });
+                await actions.refreshVaults(vaultId, vault);
+            } catch (error) {
+                postLog("role_refresh_failed", { level: "warning", code: errorCode(error) });
+            }
         }
         await render();
         return role;
