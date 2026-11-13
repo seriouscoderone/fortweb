@@ -254,7 +254,8 @@ for (const width of [1440, 768, 411, 360]) {
         const role = mine.getByRole('listitem')
             .filter({ has: page.getByRole('heading', { level: 3, name: 'front-desk' }) });
         await expect(role).toHaveCount(1);
-        await expect(role.getByText('front-desk-demo at example.org', { exact: true })).toBeVisible();
+        await expect(role.getByText('From example.org', { exact: true })).toBeVisible();
+        await expect(role.getByText('front-desk-demo', { exact: true })).toBeVisible();
         await expect(role.getByText('Identifier: front-desk', { exact: true })).toBeVisible();
         await expect(role.getByText('Not appointed yet', { exact: true })).toBeVisible();
         await expect(role.locator('[data-responsibility]')).toHaveCount(1);
