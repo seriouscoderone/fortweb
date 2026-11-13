@@ -342,7 +342,11 @@ async def _roles_take_on(params: dict) -> dict:
     read, publication, role = _role_in_last_read(params)
     choice = _identifier_choice(params)
     address = read["source"]["address"]
-    records = _records(hby)
+    try:
+        records = _records(hby)
+    except Exception as error:  # a record that cannot be read: nothing is written
+        _diagnose("role_store_failed", level="error", exception=type(error).__name__)
+        raise RuntimeFault("BAD_RESPONSE", COULD_NOT_KEEP) from None
     if choice["mode"] == "existing":
         aid = vaulting.identifier_hab(hby, vaulting.require_text(choice.get("aid"), field="Identifier")).pre
         if any((record.address, record.target, record.role, record.aid) == (address, publication["target"],

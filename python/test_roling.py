@@ -484,6 +484,19 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(self.snapshot()[1].values()), ["new one", "teacher"])
         self.assertEqual(self.vault.reloads, reloads)
 
+    async def test_a_roles_store_that_cannot_be_read_refuses_a_take_on_plainly(self):
+        await self.take_on("cashier")
+        (key, _), = self.stored("frol.").items()
+        self.stored("frol.")[key] = b'{"id": "x", "not a member": 1}'  # datify cannot make a record of it
+        before = self.snapshot()
+        self.diagnostics.clear()
+        for identifier in ({"mode": "new", "alias": "new one"}, {"mode": "existing", "aid": next(iter(self.vault.habs))}):
+            with self.subTest(mode=identifier["mode"]):
+                self.assertEqual(await self.fault("roles.takeOn", self.params(identifier=identifier)),
+                                 ("BAD_RESPONSE", "The wallet could not keep that role."))
+                self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.diagnostics, [("role_store_failed", {"level": "error", "exception": "TypeError"})] * 2)
+
     async def test_take_on_with_a_new_identifier_stores_the_role_and_its_definitions(self):
         got = await self.take_on("cashier")
         (pre, hab), = self.vault.habs.items()
