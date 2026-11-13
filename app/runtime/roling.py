@@ -386,8 +386,14 @@ async def _roles_take_on(params: dict) -> dict:
         _diagnose("role_store_failed", level="error", exception=type(error).__name__)
         raise RuntimeFault("BAD_RESPONSE", COULD_NOT_KEEP) from None
     # 5. Known limit: a persist writes one store after another, so a persist that is interrupted can still leave an
-    # identifier without the role, or a role without its definitions (roles.list lists it with no responsibilities).
-    reopened = await vaulting.persist_and_reload()
+    # identifier without the role, or a role without its definitions. A persist that fails takes the role's data out
+    # of memory again, as far as it can, as a failed write does; an identifier made stays (the known limit above).
+    try:
+        reopened = await vaulting.persist_and_reload()
+    except Exception as error:
+        _forget_role(roles, stored, record, [said for said in needed if said not in listed])
+        _diagnose("role_store_failed", level="error", exception=type(error).__name__)
+        raise RuntimeFault("BAD_RESPONSE", COULD_NOT_KEEP) from None
     return {"role": _role_view(reopened["hby"], record)}
 
 

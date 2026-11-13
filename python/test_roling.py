@@ -464,6 +464,26 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         taken = await self.take_on("instructor", {"mode": "existing", "aid": made})
         self.assertEqual(taken["role"]["identifierAlias"], "new one")
 
+    async def test_a_persist_that_fails_takes_the_role_out_of_memory_again(self):
+        await self.take_on("instructor", {"mode": "new", "alias": "teacher"}, target=CLASS_BRICK)  # shares definitions
+        (stores, identifiers, reloads) = self.snapshot()
+
+        async def fails():
+            raise StoreWriteError("the persist failed")
+        self.vault.persist_and_reload = fails
+        for identifier in ({"mode": "existing", "aid": next(iter(identifiers))}, {"mode": "new", "alias": "new one"}):
+            with self.subTest(mode=identifier["mode"]):
+                self.diagnostics.clear()
+                self.assertEqual(await self.fault("roles.takeOn", self.params(identifier=identifier)),
+                                 ("BAD_RESPONSE", "The wallet could not keep that role."))
+                self.assertEqual(self.diagnostics, [("role_store_failed",
+                                                     {"level": "error", "exception": "StoreWriteError"})])
+                # The role's record and the definitions it added are gone again; an identifier made stays (the
+                # known limit of a take-on that fails once its identifier is made).
+                self.assertEqual(self.snapshot()[0], stores)
+        self.assertEqual(sorted(self.snapshot()[1].values()), ["new one", "teacher"])
+        self.assertEqual(self.vault.reloads, reloads)
+
     async def test_take_on_with_a_new_identifier_stores_the_role_and_its_definitions(self):
         got = await self.take_on("cashier")
         (pre, hab), = self.vault.habs.items()
