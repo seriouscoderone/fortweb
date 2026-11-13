@@ -266,6 +266,7 @@ export const fixtureSourceView = {
     },
     checked: 4,
     dropped: { entries: 0, publications: 0 },
+    unread: 0,
     publications: [
         {
             target: "EAfixtureSelection000000000000000000000000000",
