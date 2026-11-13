@@ -262,6 +262,22 @@ class SourceDocumentTest(unittest.TestCase):
         self.assertEqual([p["target"] for p in got["document"]["publications"]], [SAID_A, SAID_B])
         self.assertEqual(got["dropped"], {"entries": 0, "publications": len(bad)})
 
+    def test_a_format_character_makes_a_publication_unusable(self):
+        # Right-to-left override, first-strong isolate, zero-width space, byte order mark, soft hyphen: Unicode Cf.
+        for mark in ("\u202e", "\u2066", "\u200b", "\ufeff", "\u00ad"):
+            for member, value in (("name", f"Front desk at bank.example{mark}"), ("tags", [f"t{mark}"]),
+                                  ("description", f"d{mark}"), ("collection", f"c{mark}")):
+                with self.subTest(mark=hex(ord(mark)), member=member):
+                    got = self.read(_doc(publications=[_publication(**{member: value}), _publication(target=SAID_B)]))
+                    self.assertEqual([p["target"] for p in got["document"]["publications"]], [SAID_B])
+                    self.assertEqual(got["dropped"]["publications"], 1)
+
+    def test_letters_of_any_script_and_an_emoji_are_usable(self):
+        for text in ("caf\u00e9", "\u65e5\u672c\u8a9e", "\U0001F600"):
+            with self.subTest(text=text):
+                got = self.read(_doc(publications=[_publication(name=text, tags=[text])]))
+                self.assertEqual([p["name"] for p in got["document"]["publications"]], [text])
+
     def test_publication_by_returned_as_stated(self):
         got = self.read(_doc(publications=[_publication(by="Eabc_-1"), _publication(target=SAID_B)]))
         self.assertEqual([p["by"] for p in got["document"]["publications"]], ["Eabc_-1", None])
@@ -513,6 +529,32 @@ class RolesTest(unittest.TestCase):
                 self.assertEqual(got["roles"], [{"role": "ok", "responsibilities": [{
                     "said": SAID_D, "alias": "ok", "reliesOn": [dict(ref, **{"as": "ok"})], "attests": [],
                     "outcome": None}]}])
+
+    def test_names_with_a_format_character_are_not_used(self):
+        for mark in ("\u202e", "\u2066", "\u200b", "\ufeff", "\u00ad"):
+            with self.subTest(mark=hex(ord(mark))):
+                got = self.s.roles_of_selection(self.bounded_defs(f"cashier{mark}"), SAID_A)
+                ref = {"said": SAID_C, "alias": "", "kind": ""}
+                self.assertEqual(got["title"], "")
+                self.assertEqual(got["roles"], [{"role": "ok", "responsibilities": [{
+                    "said": SAID_D, "alias": "ok", "reliesOn": [dict(ref, **{"as": "ok"})], "attests": [],
+                    "outcome": None}]}])
+
+    def test_names_in_any_script_or_with_an_emoji_are_used(self):
+        for text in ("caf\u00e9", "\u65e5\u672c\u8a9e", "\U0001F600 cashier"):
+            with self.subTest(text=text):
+                got = self.s.roles_of_selection(self.bounded_defs(text), SAID_A)
+                self.assertEqual(got["title"], text)
+                self.assertEqual([role["role"] for role in got["roles"]], sorted(["ok", text]))
+
+    def test_a_role_that_does_not_show_is_ignored(self):
+        for text in ("", " ", "   ", "\u00a0", "\t "):
+            with self.subTest(text=repr(text)):
+                defs = self.bounded_defs("ok")
+                defs[SAID_B]["role"] = text
+                got = self.s.roles_of_selection(defs, SAID_A)
+                self.assertEqual([role["role"] for role in got["roles"]], ["ok"])
+                self.assertEqual([r["said"] for r in got["roles"][0]["responsibilities"]], [SAID_D])
 
     def test_an_unusable_as_drops_only_that_item(self):
         defs = self.bounded_defs("ok")

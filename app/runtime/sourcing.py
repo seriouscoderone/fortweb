@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import unicodedata
 from urllib.parse import urlsplit
 
 SAID_PATTERN = re.compile(r"^E[A-P][A-Za-z0-9_-]{42}$")
@@ -219,7 +220,10 @@ def _units(text: str) -> int:
 
 
 def _text(value, limit: int) -> bool:
-    return isinstance(value, str) and _units(value) <= limit and CONTROL.search(value) is None
+    """A string that may be shown: at most `limit` UTF-16 units, no C0/C1 control character, and (wallet-only) no
+    format character (Unicode category Cf), which can reverse the text around it or not show at all."""
+    return (isinstance(value, str) and _units(value) <= limit and CONTROL.search(value) is None
+            and not any(unicodedata.category(ch) == "Cf" for ch in value))
 
 
 def _publication(item) -> dict | None:
@@ -335,8 +339,8 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
 
     Anything of the wrong shape is ignored. A string is used only if it is at most DISPLAY_NAME UTF-16 units and
-    has no C0/C1 control character; any other is treated as a member of the wrong type: an rr whose `role` is not
-    usable is ignored, a `rely_on` item whose `as` is not usable is ignored, and an unusable name, alias or kind is
+    has no C0/C1 control character and no format character (Cf); any other is treated as a member of the wrong
+    type: an rr whose `role` is not usable, or has no character that is not white space, is ignored, a `rely_on` item whose `as` is not usable is ignored, and an unusable name, alias or kind is
     "". A referenced SAID with no definition gets alias "" and kind "".
     """
     def member(obj, name: str) -> str:
@@ -359,7 +363,8 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     roles: dict[str, list[dict]] = {}
     for said in dict.fromkeys(item for item in selection["rrs"] if is_said(item)):  # once each, first order kept
         rr = definitions.get(said)
-        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _display_name(rr.get("role")):
+        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _display_name(rr.get("role")) \
+                or not rr["role"].strip():
             continue
         relies_on = [
             dict(ref(item["said"]), **{"as": item["as"]})

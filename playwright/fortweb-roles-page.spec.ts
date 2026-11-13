@@ -154,6 +154,19 @@ test.describe('Roles page', () => {
         expect(dialogs).toEqual([]);
     });
 
+    test('a publication whose name reverses the text after it is not shown, and is counted', async ({ context, page }) => {
+        await routeFixtureSource(context, { edit: editSource((document) => {
+            document.publications[1].name = 'Front desk at bank.example\u202e';
+        }) });
+        await setUpWallet(page);
+        await openAddress(page, FIXTURE_HOST);
+        const roles = rolesPage(page);
+        await expect(roles.summary).toHaveText(/^2 publications, /u, { timeout: 90_000 });
+        await expect(roles.cards).toHaveCount(2);
+        await expect(roles.main.getByText('1 entry was ignored.', { exact: true })).toBeVisible();
+        await expect(roles.main.getByText(/bank\.example/)).toHaveCount(0);
+    });
+
     test('a source whose text is not well-formed Unicode is not a valid source', async ({ context, page }) => {
         // JSON.stringify writes an unpaired surrogate as the escape \ud83d: valid JSON, but text that cannot be
         // stored or sent as UTF-8.
