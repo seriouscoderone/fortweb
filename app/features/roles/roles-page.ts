@@ -353,16 +353,26 @@ function openTakeOnDialog(
     }
     for (const radio of radios) {
         radio.addEventListener("change", showChoice);
-        // The form has no submit button of its own (Cancel and Take on are the modal's), so Enter on a choice would
-        // do nothing. It takes on the role as the "Take on" button does. The key's default is prevented so that it
-        // is handled once, also when the empty-name sentence moves the focus to the name field.
-        radio.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                void submit();
-            }
-        });
     }
+    // Only a fresh press of Enter takes on a role. A key held down repeats, and its repeats would take the role on
+    // again and again (the browser submits a one-field form on each); a press that began before the dialog opened
+    // reaches it only as repeats. So a repeat's default, the form's submission among it, is prevented.
+    // The form has no submit button of its own (Cancel and Take on are the modal's), so Enter on a choice would do
+    // nothing: it takes on the role as the "Take on" button does. The key's default is prevented so that it is
+    // handled once, also when the empty-name sentence moves the focus to the name field.
+    form.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") {
+            return;
+        }
+        if (event.repeat) {
+            event.preventDefault();
+            return;
+        }
+        if (event.target instanceof HTMLInputElement && radios.includes(event.target)) {
+            event.preventDefault();
+            void submit();
+        }
+    });
 
     let working = false;
     async function submit(): Promise<void> {
