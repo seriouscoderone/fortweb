@@ -421,13 +421,17 @@ async def _roles_remove(params: dict) -> dict:
     record = roles.get(keys=(role_id,)) if isinstance(role_id, str) and role_id else None
     if record is None:
         raise RuntimeFault("NOT_FOUND", "That role was not found.")
-    roles.rem(keys=(record.id,))
-    still_listed = {said for other in _records(hby) for said in other.definitions}
-    stored = _definitions_store(hby)
-    for said in record.definitions:
-        if said not in still_listed:
-            stored.rem(keys=(said,))
-    await vaulting.persist_and_reload()
+    try:
+        roles.rem(keys=(record.id,))
+        still_listed = {said for other in _records(hby) for said in other.definitions}
+        stored = _definitions_store(hby)
+        for said in record.definitions:
+            if said not in still_listed:
+                stored.rem(keys=(said,))
+        await vaulting.persist_and_reload()
+    except Exception as error:
+        _diagnose("role_remove_failed", level="error", exception=type(error).__name__)
+        raise RuntimeFault("BAD_RESPONSE", "The wallet could not remove that role.") from None
     return {"removed": True}
 
 

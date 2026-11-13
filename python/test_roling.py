@@ -821,6 +821,17 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         got = await self.roling.dispatch("roles.list", {"vaultId": VAULT})
         self.assertEqual([r["id"] for r in got["roles"]], [instructor["id"]])
 
+    async def test_a_remove_that_fails_is_a_role_the_wallet_could_not_remove(self):
+        taken = (await self.take_on("cashier"))["role"]
+        self.diagnostics.clear()
+
+        async def fails():
+            raise StoreWriteError("the persist failed")
+        self.vault.persist_and_reload = fails
+        self.assertEqual(await self.fault("roles.remove", {"vaultId": VAULT, "id": taken["id"]}),
+                         ("BAD_RESPONSE", "The wallet could not remove that role."))
+        self.assertEqual(self.diagnostics, [("role_remove_failed", {"level": "error", "exception": "StoreWriteError"})])
+
     async def test_remove_of_an_unknown_role_is_not_found(self):
         self.assertEqual((await self.fault("roles.remove", {"vaultId": VAULT, "id": "nope"}))[0], "NOT_FOUND")
         self.assertEqual(self.vault.reloads, 0)
