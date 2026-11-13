@@ -185,6 +185,7 @@ class FakeDb:
 
     def __init__(self):
         self.subdbs: dict = {}
+        self.reads: list = []  # the sub-database of every read made through a stand-in Komer, in order
         # fail_write(subkey, keys) -> True makes that write raise StoreWriteError, as a store that cannot write.
         self.fail_write = lambda subkey, keys: False
 
@@ -217,6 +218,7 @@ class FakeKomer:
         return self.klas(**json.loads(bytes(val).decode("utf-8")))
 
     def get(self, keys):
+        self.db.reads.append(self.subkey)
         val = self.items.get(self._key(keys))
         return None if val is None else self._des(val)
 
@@ -237,6 +239,7 @@ class FakeKomer:
         return self.items.pop(self._key(keys), None) is not None
 
     def getTopItemIter(self, keys=b""):
+        self.db.reads.append(self.subkey)
         for key in sorted(self.items):
             yield key, self._des(self.items[key])
 
@@ -686,7 +689,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(role["warnings"], [{"code": "NOT_APPOINTED", "message": "Not appointed yet"}])
         self.assertEqual(self.vault.reloads, 2)  # listing writes nothing
 
-    async def test_a_stored_definition_that_cannot_be_parsed_is_treated_as_missing(self):
+    async def test_a_stored_definition_that_cannot_be_parsed_does_not_change_the_list(self):
         taken = (await self.take_on("cashier"))["role"]
         self.assertTrue(taken["responsibilities"])
         definitions = self.stored("fdef.")
@@ -695,10 +698,85 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
                 self.diagnostics.clear()
                 definitions[(DROPIN,)] = json.dumps({"said": DROPIN, "text": text}).encode()
                 listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
-                # Still listed, with what can be derived without the selection: no responsibilities.
-                self.assertEqual([(role["id"], role["responsibilities"]) for role in listed], [(taken["id"], [])])
-                self.assertEqual(self.diagnostics, [("role_definition_unreadable",
-                                                     {"level": "warning", "said": DROPIN})])
+                # The list comes from the records: the role is listed with its responsibilities, as read.
+                self.assertEqual([(role["id"], role["responsibilities"]) for role in listed],
+                                 [(taken["id"], taken["responsibilities"])])
+                self.assertEqual(self.diagnostics, [])
+
+    async def test_list_reads_no_definition(self):
+        await self.take_on("cashier")
+        await self.take_on("instructor", target=CLASS_BRICK)
+        self.vault.data.reads.clear()
+        listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
+        self.assertEqual(len(listed), 2)
+        self.assertEqual(self.vault.data.reads, ["frol."])
+        self.assertFalse(hasattr(self.sourcing, "parse_definition"))
+
+    async def test_the_take_on_answer_is_the_role_as_listed(self):
+        taken = (await self.take_on("cashier"))["role"]
+        listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
+        self.assertEqual(listed, [taken])
+
+    async def test_a_record_written_before_the_role_kept_its_responsibilities_is_listed_with_none(self):
+        taken = (await self.take_on("cashier"))["role"]
+        (key, text), = self.stored("frol.").items()
+        record = json.loads(text)
+        record.pop("shown")
+        self.stored("frol.")[key] = json.dumps(record).encode()
+        listed = (await self.roling.dispatch("roles.list", {"vaultId": VAULT}))["roles"]
+        self.assertEqual([(role["id"], role["role"], role["responsibilities"]) for role in listed],
+                         [(taken["id"], "cashier", [])])
+
+    async def read_made(self, relied: int, total_bytes: int):
+        """A source of one publication "made": a selection with one rr (role "keeper") that relies `relied` times on
+        one fact. The role holds `relied` + 1 items, and its three definitions are `total_bytes` bytes together (the
+        selection is padded with a member the wallet ignores)."""
+        import blake3
+        fill = "#" * 44
+
+        def make(body):
+            raw = json.dumps(dict(d=fill, **body), separators=(",", ":")).encode()
+            said = self.sourcing.encode_said(blake3.blake3(raw).digest())
+            return said, raw.replace(fill.encode(), said.encode())
+        fact, fact_raw = make({"kind": "fact", "alias": "seat"})
+        rr, rr_raw = make({"kind": "rr", "role": "keeper", "alias": "keep",
+                           "rely_on": [{"said": fact, "as": "seat"}] * relied})
+        base = len(make({"kind": "selection", "name": "Made", "rrs": [rr], "pad": ""})[1])
+        pad = total_bytes - len(fact_raw) - len(rr_raw) - base
+        self.assertGreaterEqual(pad, 0)
+        selection, selection_raw = make({"kind": "selection", "name": "Made", "rrs": [rr], "pad": "x" * pad})
+        files = {fact: fact_raw, rr: rr_raw, selection: selection_raw}
+        self.assertEqual(sum(len(raw) for raw in files.values()), total_bytes)
+        document = json.dumps({
+            "source": ADDRESS,
+            "serves": [{"said": selection, "refers": [rr]}, {"said": rr, "refers": [fact]}, {"said": fact}],
+            "publications": [{"target": selection, "name": "made", "description": "", "tags": [], "collection": ""}],
+        }).encode()
+
+        async def fetch_bytes(url, timeout_ms):
+            return document if url == ADDRESS else files[url[len(BASE):-len(".json")]]
+        no_fetch = self.roling._fetch_bytes
+        self.roling._fetch_bytes = fetch_bytes
+        self.roling.js.performance = types.SimpleNamespace(now=lambda: 0.0)
+        await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
+        self.roling._fetch_bytes = no_fetch
+        return selection
+
+    async def test_a_role_is_kept_up_to_two_hundred_items_and_two_hundred_thousand_bytes(self):
+        self.assertEqual((self.roling.ROLE_ITEMS, self.roling.ROLE_BYTES), (200, 200_000))
+        too_much = ("BAD_RESPONSE", "mad.seriouscoder.one publishes more than the wallet keeps for one role.")
+        for relied, total, kept in ((199, 200_000, True), (200, 20_000, False), (10, 200_001, False)):
+            with self.subTest(items=relied + 1, bytes=total):
+                selection = await self.read_made(relied, total)
+                params = self.params("keeper", {"mode": "new", "alias": f"keeper {relied} {total}"}, target=selection,
+                                     publication="made")
+                before = self.snapshot()
+                if kept:
+                    taken = (await self.roling.dispatch("roles.takeOn", params))["role"]
+                    self.assertEqual(len(taken["responsibilities"][0]["reliesOn"]), relied)
+                else:
+                    self.assertEqual(await self.fault("roles.takeOn", params), too_much)
+                    self.assertEqual(self.snapshot(), before)
 
     async def test_list_of_a_vault_with_no_roles_is_empty(self):
         self.assertEqual(await self.roling.dispatch("roles.list", {"vaultId": VAULT}), {"roles": []})

@@ -214,13 +214,18 @@ async def _sources_read(params: dict) -> dict:
     return {key: value for key, value in result.items() if key not in _ENGINE_ONLY}
 
 
-# Roles taken on. A record keeps where the role came from and the SAIDs of every definition its view needs; the
-# definitions are kept once each, by SAID, as served. The view is derived again from them on every list, so a role
-# shows its responsibilities with no network.
+# Roles taken on. A record keeps where the role came from, the role's responsibilities as the read showed them, and
+# the SAIDs of every definition its view needs; the definitions are kept once each, by SAID, as served. My roles is
+# read from the records alone, with no network and without reading or parsing any definition.
 
 OPEN_AGAIN = "Open the address again before taking on a role."
 ALREADY_TAKEN = "This identifier has already taken on that role."
 NOT_APPOINTED = {"code": "NOT_APPOINTED", "message": "Not appointed yet"}
+
+# A role is kept only if it is this small: its responsibilities and their references (reliesOn, attests, outcome)
+# counted together, and the UTF-8 bytes of the definitions it needs.
+ROLE_ITEMS = 200
+ROLE_BYTES = 200_000
 
 
 @dataclass
@@ -233,6 +238,8 @@ class RoleRecord:
     title: str = ""
     role: str = ""
     responsibilities: list[str] = field(default_factory=list)
+    # The responsibilities as the read showed them; a record written before they were kept has none.
+    shown: list[dict] = field(default_factory=list)
     definitions: list[str] = field(default_factory=list)
     aid: str = ""
     taken_at: str = ""
@@ -297,6 +304,12 @@ def _needed(target: str, role: dict, derived_from: list[str]) -> list[str]:
     return [said for said in dict.fromkeys(saids) if said in used]
 
 
+def _role_items(role: dict) -> int:
+    """A role's responsibilities and their references (reliesOn, attests, outcome), counted together."""
+    return sum(1 + len(duty["reliesOn"]) + len(duty["attests"]) + (duty["outcome"] is not None)
+               for duty in role["responsibilities"])
+
+
 def _identifier_choice(params: dict) -> dict:
     choice = params.get("identifier")
     if not isinstance(choice, dict) or choice.get("mode") not in ("new", "existing"):
@@ -305,25 +318,13 @@ def _identifier_choice(params: dict) -> dict:
 
 
 def _role_view(hby, record: RoleRecord) -> dict:
-    stored = _definitions_store(hby)
-    definitions = {}
-    for said in record.definitions:
-        found = stored.get(keys=(said,))
-        if found is None:
-            continue
-        try:
-            definitions[said] = sourcing.parse_definition(found.text)
-        except ValueError:
-            # Treated as missing: the role is still listed, with what can be derived without it.
-            _diagnose("role_definition_unreadable", level="warning", said=said)
-    selection = sourcing.roles_of_selection(definitions, record.target)
-    role = next((item for item in selection["roles"] if item["role"] == record.role), None)
+    """The role as My roles shows it, from its record alone."""
     hab = hby.habByPre(record.aid)
     return {
         "id": record.id, "address": record.address, "host": record.host, "target": record.target,
         "publication": record.publication, "title": record.title, "role": record.role, "aid": record.aid,
         "identifierAlias": hab.name if hab is not None else "", "takenAt": record.taken_at,
-        "responsibilities": role["responsibilities"] if role is not None else [],
+        "responsibilities": record.shown,
         "warnings": [dict(NOT_APPOINTED)],
     }
 
@@ -355,10 +356,14 @@ async def _roles_take_on(params: dict) -> dict:
 
     definitions = read["definitions"]
     needed = _needed(publication["target"], role, read["derivedFrom"][publication["target"]])
+    if _role_items(role) > ROLE_ITEMS \
+            or sum(len(definitions[said].encode("utf-8")) for said in needed) > ROLE_BYTES:
+        raise RuntimeFault("BAD_RESPONSE", f"{read['source']['host']} publishes more than the wallet keeps for one role.")
     record = RoleRecord(
         id=uuid4().hex, address=address, host=read["source"]["host"], target=publication["target"],
         publication=publication["name"], title=publication["title"], role=role["role"],
-        responsibilities=[item["said"] for item in role["responsibilities"]], definitions=needed, aid=aid,
+        responsibilities=[item["said"] for item in role["responsibilities"]], shown=role["responsibilities"],
+        definitions=needed, aid=aid,
         taken_at=_now(),
     )
     roles = _roles_store(hby)

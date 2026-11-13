@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
+import { FIXTURE_HOST, definition, routeFixtureSource } from './fixtures/mad-source.js';
 import {
     DROPIN_CLASS, setUpWallet, startRequest, finishRequest, rolesPage, NOT_APPOINTED_SENTENCE, OPEN_AGAIN,
     editSource, openAddress, takeOnDialog, ALREADY_TAKEN, CASHIER_DUTIES, showDropinRoles, myRoles, startTakingOn,
@@ -44,6 +44,33 @@ test.describe('Taking on a role', () => {
         await nav.getByRole('link', { name: 'Identifiers', exact: true }).click();
         await expect(page.getByRole('link', { name: 'cashier', exact: true })).toBeVisible();
     });
+
+    test('a role whose definitions are too large to keep is refused in the dialog, and My roles keeps its roles',
+        async ({ context, page }) => {
+            const [rr, rrBytes] = definition({ kind: 'rr', role: 'keeper', alias: 'keep' });
+            const [selection, selectionBytes] = definition({ kind: 'selection', name: 'Heavy', rrs: [rr],
+                pad: 'x'.repeat(200_000) });
+            await routeFixtureSource(context, {
+                extra: new Map([[rr, rrBytes], [selection, selectionBytes]]),
+                edit: editSource((document) => {
+                    document.serves.push({ said: selection, refers: [rr] }, { said: rr, refers: [] });
+                    document.publications.push({ ...document.publications[1], target: selection, name: 'heavy' });
+                }),
+            });
+            await setUpWallet(page);
+            await showDropinRoles(page);
+            await takeOnWithNewIdentifier(page, 'cashier');
+            const heavy = rolesPage(page).card('heavy');
+            await heavy.getByRole('button', { name: 'Show roles' }).click();
+            await heavy.getByRole('button', { name: 'Take on keeper', exact: true }).click();
+            const dialog = takeOnDialog(page, 'keeper');
+            await dialog.takeOn.click();
+            await expect(dialog.status).toHaveText('mad.example.test publishes more than the wallet keeps for one role.',
+                { timeout: 90_000 });
+            await expect(dialog.dialog).toBeVisible();
+            await expect(myRoles(page).items).toHaveCount(1);
+            await expect(myRoles(page).item('cashier')).toHaveCount(1);
+        });
 
     test('no request leaves the page while taking on a role', async ({ context, page }) => {
         await routeFixtureSource(context);
