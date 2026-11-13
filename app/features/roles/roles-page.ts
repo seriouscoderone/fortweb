@@ -57,6 +57,8 @@ export interface SourceView {
     };
     checked: number;
     dropped: { entries: number; publications: number };
+    /** The valid publications past the ones a read reads (50). */
+    unread: number;
     publications: PublicationView[];
 }
 
@@ -198,6 +200,11 @@ function sourceSummary(view: SourceView): HTMLElement {
         + `${counted(view.checked, "definition checked", "definitions checked")}`);
     counts.dataset.rolesSummary = "true";
     summary.append(counts);
+    if (view.unread > 0) {
+        summary.append(element("p",
+            `${counted(view.unread, "more publication is", "more publications are")} not shown: `
+            + `${source.host} publishes more than the wallet reads in one go.`));
+    }
 
     if (source.by) {
         summary.append(element("p", `Unverified: says it is run by ${source.by}`, "muted roles-unverified"));

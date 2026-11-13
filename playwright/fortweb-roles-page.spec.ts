@@ -275,6 +275,23 @@ test.describe('Roles page', () => {
         await expect(roles.card('class-brick').getByRole('button', { name: 'Show roles' })).toHaveCount(1);
     });
 
+    test('a source with more than fifty publications shows fifty and says how many more there are',
+        async ({ context, page }) => {
+            await routeFixtureSource(context, { edit: editSource((document) => {
+                document.publications = Array.from({ length: 60 },
+                    (_, n) => ({ ...document.publications[1], name: `dropin ${n + 1}` }));
+            }) });
+            await setUpWallet(page);
+            const roles = rolesPage(page);
+            await openAddress(page, FIXTURE_HOST);
+            await expect(roles.summary).toHaveText('50 publications, 19 definitions checked', { timeout: 90_000 });
+            await expect(roles.cards).toHaveCount(50);
+            await expect(roles.card('dropin 50')).toHaveCount(1);
+            await expect(roles.card('dropin 51')).toHaveCount(0);
+            await expect(roles.main.getByText('10 more publications are not shown: mad.example.test publishes more '
+                + 'than the wallet reads in one go.', { exact: true })).toBeVisible();
+        });
+
     test('a publication past the read\'s limit shows its sentence and no roles', async ({ context, page }) => {
         // Fifty served definitions that do not exist use up the definitions one read fetches; dropin-class, listed
         // after them, still needs its own and is cut off.
