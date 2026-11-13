@@ -130,6 +130,28 @@ def _doc(**members) -> bytes:
     return json.dumps(doc).encode()
 
 
+# The characters refused in a string that is shown: mad-discovery's Ruling 13 (src/source.ts FORBIDDEN).
+# Right-to-left override, first-strong isolate, zero-width space, byte order mark, soft hyphen, Arabic letter mark,
+# Mongolian vowel separator, language tag.
+FORBIDDEN_EXAMPLES = ("\u202e", "\u2066", "\u200b", "\ufeff", "\u00ad", "\u061c", "\u180e", "\U000E0001")
+# A joined emoji sequence (woman, ZWJ, laptop), Persian with a zero-width non-joiner, accented and CJK letters.
+KEPT_EXAMPLES = ("\U0001F469\u200d\U0001F4BB", "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", "caf\u00e9",
+                 "\u65e5\u672c\u8a9e")
+RULING_13 = ([*range(0x00, 0x20), *range(0x7F, 0xA0), 0xAD, 0x61C, 0x180E, 0x200B, 0x200E, 0x200F,
+              *range(0x202A, 0x202F), *range(0x2060, 0x2065), *range(0x2066, 0x206A), 0xFEFF, *range(0xE0000, 0xE0080)])
+
+
+class TextRuleTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+
+    def test_the_rule_refuses_exactly_the_214_code_points_of_ruling_13(self):
+        refused = [code for code in range(0x110000) if not 0xD800 <= code <= 0xDFFF
+                   and not self.s._text(f"a{chr(code)}b", 10)]
+        self.assertEqual(len(RULING_13), 214)
+        self.assertEqual(refused, RULING_13)
+
+
 class SourceDocumentTest(unittest.TestCase):
     def setUp(self):
         self.s = _load()
@@ -262,9 +284,8 @@ class SourceDocumentTest(unittest.TestCase):
         self.assertEqual([p["target"] for p in got["document"]["publications"]], [SAID_A, SAID_B])
         self.assertEqual(got["dropped"], {"entries": 0, "publications": len(bad)})
 
-    def test_a_format_character_makes_a_publication_unusable(self):
-        # Right-to-left override, first-strong isolate, zero-width space, byte order mark, soft hyphen: Unicode Cf.
-        for mark in ("\u202e", "\u2066", "\u200b", "\ufeff", "\u00ad"):
+    def test_a_forbidden_character_makes_a_publication_unusable(self):
+        for mark in FORBIDDEN_EXAMPLES:
             for member, value in (("name", f"Front desk at bank.example{mark}"), ("tags", [f"t{mark}"]),
                                   ("description", f"d{mark}"), ("collection", f"c{mark}")):
                 with self.subTest(mark=hex(ord(mark)), member=member):
@@ -272,8 +293,8 @@ class SourceDocumentTest(unittest.TestCase):
                     self.assertEqual([p["target"] for p in got["document"]["publications"]], [SAID_B])
                     self.assertEqual(got["dropped"]["publications"], 1)
 
-    def test_letters_of_any_script_and_an_emoji_are_usable(self):
-        for text in ("caf\u00e9", "\u65e5\u672c\u8a9e", "\U0001F600"):
+    def test_letters_of_any_script_and_joined_emoji_are_usable(self):
+        for text in KEPT_EXAMPLES:
             with self.subTest(text=text):
                 got = self.read(_doc(publications=[_publication(name=text, tags=[text])]))
                 self.assertEqual([p["name"] for p in got["document"]["publications"]], [text])
@@ -530,8 +551,8 @@ class RolesTest(unittest.TestCase):
                     "said": SAID_D, "alias": "ok", "reliesOn": [dict(ref, **{"as": "ok"})], "attests": [],
                     "outcome": None}]}])
 
-    def test_names_with_a_format_character_are_not_used(self):
-        for mark in ("\u202e", "\u2066", "\u200b", "\ufeff", "\u00ad"):
+    def test_names_with_a_forbidden_character_are_not_used(self):
+        for mark in FORBIDDEN_EXAMPLES:
             with self.subTest(mark=hex(ord(mark))):
                 got = self.s.roles_of_selection(self.bounded_defs(f"cashier{mark}"), SAID_A)
                 ref = {"said": SAID_C, "alias": "", "kind": ""}
@@ -540,8 +561,8 @@ class RolesTest(unittest.TestCase):
                     "said": SAID_D, "alias": "ok", "reliesOn": [dict(ref, **{"as": "ok"})], "attests": [],
                     "outcome": None}]}])
 
-    def test_names_in_any_script_or_with_an_emoji_are_used(self):
-        for text in ("caf\u00e9", "\u65e5\u672c\u8a9e", "\U0001F600 cashier"):
+    def test_names_in_any_script_or_with_joined_emoji_are_used(self):
+        for text in KEPT_EXAMPLES:
             with self.subTest(text=text):
                 got = self.s.roles_of_selection(self.bounded_defs(text), SAID_A)
                 self.assertEqual(got["title"], text)

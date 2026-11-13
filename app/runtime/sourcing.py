@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import unicodedata
 from urllib.parse import urlsplit
 
 SAID_PATTERN = re.compile(r"^E[A-P][A-Za-z0-9_-]{42}$")
@@ -159,7 +158,12 @@ def definition_address(base: str, said: str) -> str:
 # A source document (mad-discovery src/document.ts, src/source.ts, src/scan.ts parseBounded).
 
 AID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
-CONTROL = re.compile(r"[\u0000-\u001f\u007f-\u009f]")
+# Refused in a string that is shown: the C0 and C1 controls; the bidirectional controls, which reverse displayed
+# text; and the format characters that do not show, which make two names look alike. The joiners U+200C and U+200D
+# are allowed: emoji sequences and Persian need them. This is mad-discovery's Ruling 13 (src/source.ts FORBIDDEN),
+# 214 code points, and must stay equal to it.
+FORBIDDEN = re.compile(r"[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e"
+                       r"\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]")
 PUBLICATION_NAME = 200
 PUBLICATION_DESCRIPTION = 2000
 PUBLICATION_TAGS = 32
@@ -220,10 +224,8 @@ def _units(text: str) -> int:
 
 
 def _text(value, limit: int) -> bool:
-    """A string that may be shown: at most `limit` UTF-16 units, no C0/C1 control character, and (wallet-only) no
-    format character (Unicode category Cf), which can reverse the text around it or not show at all."""
-    return (isinstance(value, str) and _units(value) <= limit and CONTROL.search(value) is None
-            and not any(unicodedata.category(ch) == "Cf" for ch in value))
+    """A string that may be shown: at most `limit` UTF-16 units and no FORBIDDEN character."""
+    return isinstance(value, str) and _units(value) <= limit and FORBIDDEN.search(value) is None
 
 
 def _publication(item) -> dict | None:
@@ -339,7 +341,7 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
 
     Anything of the wrong shape is ignored. A string is used only if it is at most DISPLAY_NAME UTF-16 units and
-    has no C0/C1 control character and no format character (Cf); any other is treated as a member of the wrong
+    has no FORBIDDEN character (Ruling 13); any other is treated as a member of the wrong
     type: an rr whose `role` is not usable, or has no character that is not white space, is ignored, a `rely_on` item whose `as` is not usable is ignored, and an unusable name, alias or kind is
     "". A referenced SAID with no definition gets alias "" and kind "".
     """
