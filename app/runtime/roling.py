@@ -16,6 +16,7 @@ from inspect import isawaitable
 from uuid import uuid4
 
 import js
+from pyodide.ffi import create_proxy
 
 import sourcing
 import vaulting
@@ -86,7 +87,9 @@ def _options(signal):
 
 
 async def _fetch_or_none(url: str, timeout_ms: int):
-    """The response, or None when the fetch rejected; also whether the timeout fired. Clears its timer on rejection."""
+    """The response, or None when the fetch rejected; its controller; a `release` that clears the timer and frees what
+    the timer holds (None once done here, on rejection; the caller calls it once it is done with the response); and
+    whether the timeout fired."""
     controller = js.AbortController.new()
     fired = []
 
@@ -94,12 +97,27 @@ async def _fetch_or_none(url: str, timeout_ms: int):
         fired.append(True)
         _abort_quietly(controller)
 
-    timer = js.setTimeout(_abort, max(1, int(timeout_ms)))
+    # A bare Python function handed to the browser is a proxy Pyodide destroys when setTimeout returns, and the timer
+    # would find nothing to call. This one lives until release(), after the timer has fired or been cleared.
+    on_time = create_proxy(_abort)
     try:
-        return await _settle(js.fetch(url, _options(controller.signal))), controller, timer, fired
-    except Exception:
+        timer = js.setTimeout(on_time, max(1, int(timeout_ms)))
+    except BaseException:
+        on_time.destroy()
+        raise
+
+    def release():
         js.clearTimeout(timer)
+        on_time.destroy()
+
+    try:
+        return await _settle(js.fetch(url, _options(controller.signal))), controller, release, fired
+    except Exception:
+        release()
         return None, controller, None, fired
+    except BaseException:  # the request itself was cancelled: nothing is left behind either
+        release()
+        raise
 
 
 def _abort_quietly(controller) -> None:
@@ -148,7 +166,7 @@ def _is_json_type(header) -> bool:
 
 async def _fetch_checked(url: str, timeout_ms: int, host: str, count: _BodyCount) -> bytes:
     started = _clock()
-    response, controller, timer, fired = await _fetch_or_none(url, timeout_ms)
+    response, controller, release, fired = await _fetch_or_none(url, timeout_ms)
     if response is None:
         if fired or _clock() - started >= timeout_ms:
             raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.")
@@ -180,7 +198,7 @@ async def _fetch_checked(url: str, timeout_ms: int, host: str, count: _BodyCount
             chunks.append(chunk)
         return b"".join(chunks)
     finally:
-        js.clearTimeout(timer)
+        release()
         _abort_quietly(controller)  # ends anything still open; a no-op once the body is read
 
 

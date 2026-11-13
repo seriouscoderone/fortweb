@@ -49,10 +49,37 @@ def _stand_ins(modules: dict):
                 sys.modules[key] = value
 
 
+class Proxy:
+    """What the stand-in for pyodide.ffi.create_proxy makes: a Python callable the browser may keep and call until it
+    is destroyed. It counts its destructions."""
+
+    def __init__(self, function):
+        self.function = function
+        self.destroyed = 0
+
+    def __call__(self, *args):
+        if self.destroyed:
+            raise RuntimeError("This proxy was destroyed: the browser called a function that is gone.")
+        return self.function(*args)
+
+    def destroy(self):
+        self.destroyed += 1
+
+
+def _pyodide_stand_ins() -> dict:
+    """pyodide and pyodide.ffi as roling uses them: create_proxy makes a Proxy."""
+    ffi = types.ModuleType("pyodide.ffi")
+    ffi.create_proxy = Proxy
+    pyodide = types.ModuleType("pyodide")
+    pyodide.ffi = ffi
+    return {"pyodide": pyodide, "pyodide.ffi": ffi}
+
+
 def _load_roling():
     sourcing = _load("sourcing", RUNTIME / "sourcing.py")
     with _stand_ins({"js": types.SimpleNamespace(performance=types.SimpleNamespace(now=lambda: 0.0)),
-                     "vaulting": types.SimpleNamespace(RuntimeFault=RuntimeFault), "sourcing": sourcing}):
+                     "vaulting": types.SimpleNamespace(RuntimeFault=RuntimeFault), "sourcing": sourcing,
+                     **_pyodide_stand_ins()}):
         return _load("fortweb_roling_test", RUNTIME / "roling.py"), sourcing
 
 
@@ -857,7 +884,7 @@ NOT_READABLE_SENTENCE = ("Could not read mad.example.test: it cannot be reached,
 
 class Timer:
     def __init__(self, callback, ms):
-        self.callback, self.ms, self.cleared = callback, ms, False
+        self.callback, self.ms, self.cleared, self.fired = callback, ms, False, False
 
 
 class Controller:
@@ -941,6 +968,10 @@ class StubJs:
         return self.controllers[-1]
 
     def setTimeout(self, callback, ms):
+        # In the real runtime a bare Python function handed to the browser is a proxy Pyodide destroys when this call
+        # returns, so the timer would find nothing to call: only what the runtime's proxy maker made is taken.
+        if not isinstance(callback, Proxy):
+            raise TypeError(f"setTimeout was handed {type(callback).__name__}, not a proxy from create_proxy")
         self.timers.append(Timer(callback, ms))
         return len(self.timers) - 1
 
@@ -953,7 +984,10 @@ class StubJs:
         return self.answer(url, options)
 
     def fire(self, index: int):
-        self.timers[index].callback()
+        timer = self.timers[index]
+        assert not timer.cleared, "a cleared timer does not fire"
+        timer.fired = True
+        timer.callback()
 
 
 class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
@@ -1127,6 +1161,60 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(js.controllers[0].aborted)
         self.assertEqual(len(js.calls), 1)
 
+    def test_the_timer_refuses_a_bare_function(self):
+        js = StubJs(unreachable)
+        with self.assertRaises(TypeError):
+            js.setTimeout(lambda: None, 10_000)
+        self.assertEqual(js.timers, [])
+        js.setTimeout(Proxy(lambda: None), 10_000)
+        self.assertEqual(len(js.timers), 1)
+
+    def assert_released_once(self, js: StubJs):
+        """What the request handed the browser's timer was made by the proxy maker and released exactly once, and the
+        timer was cleared or had fired."""
+        self.assertEqual(len(js.timers), 1)
+        timer, = js.timers
+        self.assertIsInstance(timer.callback, Proxy)
+        self.assertEqual(timer.callback.destroyed, 1)
+        self.assertTrue(timer.cleared or timer.fired)
+
+    async def test_what_the_timer_holds_is_released_once_after_a_request_that_succeeds(self):
+        js = self.stub(answering(response))
+        self.assertEqual(await self.roling._fetch_bytes(URL, 10_000), b"{}")
+        self.assert_released_once(js)
+        self.assertTrue(js.timers[0].cleared)
+
+    async def test_what_the_timer_holds_is_released_once_after_a_request_that_is_rejected(self):
+        js = self.stub(unreachable)
+        self.assertEqual((await self.fault()).code, "NOT_READABLE")
+        self.assert_released_once(js)
+        self.assertTrue(js.timers[0].cleared)
+
+    async def test_what_the_timer_holds_is_released_once_after_a_request_whose_time_runs_out(self):
+        async def answer(url, options):
+            js.fire(0)
+            raise RuntimeError("AbortError: signal is aborted without reason")
+        js = self.stub(answer)
+        fault = await self.fault()
+        self.assertEqual((fault.code, fault.message), ("UNREACHABLE", "Could not reach mad.example.test."))
+        self.assert_released_once(js)
+        self.assertTrue(js.timers[0].fired)
+        self.assertTrue(js.controllers[0].aborted)
+
+    async def test_what_the_timer_holds_is_released_once_after_a_body_whose_time_runs_out(self):
+        def second_read():
+            js.fire(0)
+            raise RuntimeError("AbortError: signal is aborted without reason")
+        js = self.stub(answering(lambda: response(chunks=(b"x" * 10, second_read))))
+        self.assertEqual((await self.fault()).code, "UNREACHABLE")
+        self.assert_released_once(js)
+        self.assertTrue(js.timers[0].fired)
+
+    async def test_what_the_timer_holds_is_released_once_after_a_body_that_is_too_large(self):
+        js = self.stub(answering(lambda: response(chunks=(b"x" * 1_000_001,))))
+        self.assertEqual((await self.fault()).code, "TOO_MUCH")
+        self.assert_released_once(js)
+
     async def test_a_rejected_read_is_not_readable_and_asked_once(self):
         js = self.stub(unreachable)
         fault = await self.fault(timeout_ms=10_000)
@@ -1167,6 +1255,13 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(got["checked"], 26)
         self.assertEqual(len(js.calls), 1 + 26)
         self.assert_only_reads(js, document)
+
+    async def test_a_whole_read_leaves_no_timer_and_nothing_handed_to_the_browser_behind(self):
+        answer, _ = self.fixture_answer()
+        js = self.stub(answer)
+        await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
+        self.assertEqual(len(js.timers), 1 + 26)
+        self.assertEqual([(t.cleared, t.callback.destroyed) for t in js.timers], [(True, 1)] * 27)
 
     async def test_a_rejected_source_document_makes_no_second_request(self):
         answer, document = self.fixture_answer(rejected=lambda url: url == URL)

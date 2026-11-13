@@ -33,6 +33,8 @@ export interface FixtureSourceOptions {
     sourceAnswer?: 'missing' | 'html' | 'redirect';
     /** Hold the answer to source.json: `arrived` is called when its request comes in, the answer waits for `release`. */
     holdSource?: { arrived(): void; release: Promise<void> };
+    /** Hold the answer to this definition in the same way. */
+    holdDefinition?: { said: string; arrived(): void; release: Promise<void> };
     /** Change the parsed source document before it is served (e.g. a publication's name, or the source's `by`). */
     edit?(document: Record<string, unknown>): void;
     /** More definitions to serve, by SAID (made with `definition`). */
@@ -194,6 +196,10 @@ export async function routeFixtureSource(
         const said = DEFINITION_PATH.exec(pathname)?.[1];
         if (said !== undefined) {
             requests.definitions.push(said);
+            if (said === options.holdDefinition?.said) {
+                options.holdDefinition.arrived();
+                await options.holdDefinition.release;
+            }
         }
         const body = said === undefined || said === options.missing ? undefined : served.get(said);
         if (body === undefined) {
