@@ -7,9 +7,11 @@ them together; the network, the digest and the clock are passed in, so this modu
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
+from itertools import islice
 from urllib.parse import urlsplit
 
 SAID_PATTERN = re.compile(r"^E[A-P][A-Za-z0-9_-]{42}$")
@@ -18,6 +20,11 @@ FILE_BYTES = 1_000_000
 REQUEST_MS = 10_000
 READ_MS = 60_000
 DEFINITIONS_PER_READ = 50
+# Wallet-only, so that what a read costs is bounded however a source is made (the whole-feature review): the first
+# PUBLICATIONS_PER_READ valid publications are read and the rest counted, and the answer holds at most ANSWER_ITEMS
+# items (a role, a responsibility, each reference of one).
+PUBLICATIONS_PER_READ = 50
+ANSWER_ITEMS = 5_000
 # Wallet-only: the bytes one read may receive, over the source document and every definition fetched. A definition
 # whose fetch fails counts with the bytes read before it failed. The total is checked before each fetch, not during
 # one, so a read can pass this by at most one file (FILE_BYTES, plus the last chunk read of a file that turns out
@@ -313,8 +320,10 @@ def read_source_document(raw: bytes, address: str) -> dict:
     return {"document": document, "dropped": dropped}
 
 
-def closure(serves: dict, target: str) -> list[str]:
-    """The target and every served SAID reachable from it through `refers`, sorted; [] when the target is not served."""
+def closure(serves: dict, target: str, most: int | None = None) -> list[str] | None:
+    """The target and every served SAID reachable from it through `refers`, sorted; [] when the target is not served.
+
+    With `most`, None as soon as more than `most` are found: the closure is not followed further."""
     if target not in serves:
         return []
     seen = {target}
@@ -323,6 +332,8 @@ def closure(serves: dict, target: str) -> list[str]:
         for ref in serves[todo.pop()]:
             if ref in serves and ref not in seen:
                 seen.add(ref)
+                if most is not None and len(seen) > most:
+                    return None
                 todo.append(ref)
     return sorted(seen)
 
@@ -337,13 +348,18 @@ def _display_name(value) -> bool:
     return _text(value, DISPLAY_NAME)
 
 
-def roles_of_selection(definitions: dict, target: str) -> dict:
+def roles_of_selection(definitions: dict, target: str, *, budget: int | None = None) -> dict | None:
     """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
 
     Anything of the wrong shape is ignored. A string is used only if it is at most DISPLAY_NAME UTF-16 units and
-    has no FORBIDDEN character (Ruling 13); any other is treated as a member of the wrong
-    type: an rr whose `role` is not usable, or has no character that is not white space, is ignored, a `rely_on` item whose `as` is not usable is ignored, and an unusable name, alias or kind is
-    "". A referenced SAID with no definition gets alias "" and kind "".
+    has no FORBIDDEN character (Ruling 13); any other is treated as a member of the wrong type: an rr whose `role`
+    is not usable, or has no character that is not white space, is ignored, a `rely_on` item whose `as` is not
+    usable is ignored, and an unusable name, alias or kind is "". A referenced SAID with no definition gets alias ""
+    and kind "".
+
+    `definitions` holds parsed definitions, or what `derivable` keeps of them, which derives the same. With
+    `budget`, deriving stops and None is the answer as soon as the roles hold more than `budget` items (a role, a
+    responsibility, each reference of one: see `answer_items`).
     """
     def member(obj, name: str) -> str:
         value = obj.get(name) if isinstance(obj, dict) else None
@@ -363,55 +379,81 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
     title = member(selection, "name") or member(selection, "alias")
 
     roles: dict[str, list[dict]] = {}
+    used = 0
     for said in dict.fromkeys(item for item in selection["rrs"] if is_said(item)):  # once each, first order kept
         rr = definitions.get(said)
         if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _display_name(rr.get("role")) \
                 or not rr["role"].strip():
             continue
-        relies_on = [
-            dict(ref(item["said"]), **{"as": item["as"]})
-            for item in items(rr, "rely_on")
-            if isinstance(item, dict) and is_said(item.get("said")) and _display_name(item.get("as"))
-        ]
-        attests = [ref(item) for item in items(rr, "attest") if is_said(item)]
+        relied = [item for item in items(rr, "rely_on")
+                  if isinstance(item, dict) and is_said(item.get("said")) and _display_name(item.get("as"))]
+        attested = [item for item in items(rr, "attest") if is_said(item)]
         outcome = rr.get("outcome")
         outcome_said = outcome.get("said") if isinstance(outcome, dict) else None
+        # Counted before anything is made: a role new here, the responsibility, and each of its references.
+        used += (rr["role"] not in roles) + 1 + len(relied) + len(attested) + is_said(outcome_said)
+        if budget is not None and used > budget:
+            return None
         roles.setdefault(rr["role"], []).append({
             "said": said,
             "alias": member(rr, "alias"),
-            "reliesOn": relies_on,
-            "attests": attests,
+            "reliesOn": [dict(ref(item["said"]), **{"as": item["as"]}) for item in relied],
+            "attests": [ref(item) for item in attested],
             "outcome": ref(outcome_said) if is_said(outcome_said) else None,
         })
     return {"title": title, "roles": [{"role": name, "responsibilities": roles[name]} for name in sorted(roles)]}
 
 
+def answer_items(roles: list) -> int:
+    """The items of roles in an answer: each role, each responsibility, and each of its references."""
+    return sum(1 + sum(1 + len(duty["reliesOn"]) + len(duty["attests"]) + (duty["outcome"] is not None)
+                       for duty in role["responsibilities"]) for role in roles)
+
+
+def derivable(definition) -> dict:
+    """What roles_of_selection reads of a parsed definition, and nothing else, so that a read keeps this and not
+    the parsed object (which can be hundreds of times the size of its text). roles_of_selection derives the same
+    from it as from the definition. Its lists are bounded: a list of references keeps at most ANSWER_ITEMS + 1 usable
+    items, since a responsibility with more cannot fit in an answer; `rrs` keeps each SAID once."""
+    if not isinstance(definition, dict):
+        return {}
+    kept = {name: definition[name] for name in ("kind", "alias", "name") if _display_name(definition.get(name))}
+    role = definition.get("role")
+    if _display_name(role) and role.strip():
+        kept["role"] = role
+    if isinstance(definition.get("rrs"), list):
+        kept["rrs"] = list(dict.fromkeys(item for item in definition["rrs"] if is_said(item)))
+    if isinstance(definition.get("rely_on"), list):
+        kept["rely_on"] = list(islice(({"said": item["said"], "as": item["as"]} for item in definition["rely_on"]
+                                       if isinstance(item, dict) and is_said(item.get("said"))
+                                       and _display_name(item.get("as"))), ANSWER_ITEMS + 1))
+    if isinstance(definition.get("attest"), list):
+        kept["attest"] = list(islice((item for item in definition["attest"] if is_said(item)), ANSWER_ITEMS + 1))
+    outcome = definition.get("outcome")
+    if isinstance(outcome, dict) and is_said(outcome.get("said")):
+        kept["outcome"] = {"said": outcome["said"]}
+    return kept
+
+
 # Reading a source: the document, then the definitions its publications need, each checked against its SAID.
 
-def _definition(raw: bytes, said: str, digest) -> tuple[str | None, str | None]:
-    """(the served text, None) for a definition that passes its SAID check and is bounded JSON; otherwise (None, its
-    problem): "mismatch" when the bytes fail the SAID check, "unreadable" when they pass it but are not JSON the
-    wallet accepts.
-
-    The parsed object is not kept: a read holds only texts, and parses one publication's definitions while deriving
-    its roles.
-    """
+def _definition(raw: bytes, said: str, digest) -> tuple[str | None, dict | None, str | None]:
+    """(the served text, what deriving reads of it, None) for a definition that passes its SAID check and is bounded
+    JSON; otherwise (None, None, its problem): "mismatch" when the bytes fail the SAID check, "unreadable" when they
+    pass it but are not JSON the wallet accepts. The definition is parsed here, once per read; the parsed object is
+    not kept (see `derivable`)."""
     if not check_said(raw, said, digest=digest):
-        return None, "mismatch"
+        return None, None, "mismatch"
     try:
-        _parse_bounded(raw)
-        return raw.decode("utf-8"), None
+        kept = derivable(_parse_bounded(raw))
+        return raw.decode("utf-8"), kept, None
     except (UnicodeDecodeError, ValueError):
-        return None, "unreadable"
+        return None, None, "unreadable"
 
 
-def _roles(texts: dict, needed: list[str], target: str, *, whole: bool) -> dict:
-    """roles_of_selection over the checked definitions of one closure, parsed for this call only.
-
-    With `whole` false only the target is parsed (enough for the title of a publication that gets no roles).
-    """
-    saids = needed if whole else [target]
-    return roles_of_selection({said: json.loads(texts[said]) for said in saids if texts.get(said) is not None}, target)
+def _title(kept: dict, target: str) -> str:
+    """A publication's title, from its target's checked definition alone ("" without one)."""
+    return roles_of_selection({target: kept[target]}, target)["title"] if target in kept else ""
 
 
 async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_read: int = DEFINITIONS_PER_READ,
@@ -429,6 +471,13 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     more is fetched, and a publication that still needs one gets problem "limit". When several apply, "mismatch"
     comes before "unreadable", and both before "limit". Each definition is fetched at most once. A publication with
     a problem has no roles.
+
+    What a read costs is bounded: the first PUBLICATIONS_PER_READ valid publications are read and the others counted
+    (`unread`); a closure is not followed past `definitions_per_read` definitions, and a publication whose closure is
+    larger gets "limit" with nothing fetched for it; each definition is parsed once, when it arrives; publications
+    with one target share one closure and one derivation; a publication whose roles would take the answer past
+    ANSWER_ITEMS items gets "limit"; the clock is checked for every publication, and between publications the read
+    lets other tasks run.
 
     Besides what the page is shown, the result holds `definitions` (SAID -> checked text) and `derivedFrom` (target
     -> the SAIDs of the checked definitions its roles were derived from, for each target without a problem).
@@ -452,11 +501,25 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     serves = document["serves"]
 
     fetched: dict[str, str | None] = {}  # said -> checked text, or None when it failed
+    kept: dict[str, dict] = {}  # said -> what deriving reads of its checked definition
     failed: dict[str, str] = {}  # said -> "mismatch" or "unreadable", for each one that failed
+    closures: dict[str, list[str] | None] = {}  # target -> its closure, None when larger than a read may fetch
+    derived: dict[str, dict | None] = {}  # target -> its roles, None when they did not fit what was left
+    used = 0  # the answer's items so far
     publications = []
     derived_from: dict[str, list[str]] = {}  # target -> the checked SAIDs its roles were derived from
-    for publication in document["publications"]:
-        needed = closure(serves, publication["target"])
+    shown = document["publications"][:PUBLICATIONS_PER_READ]
+    for index, publication in enumerate(shown):
+        if index:
+            await asyncio.sleep(0)  # another request may be answered between publications
+        time_left()
+        target = publication["target"]
+        if target not in closures:
+            closures[target] = closure(serves, target, definitions_per_read)
+        needed = closures[target]
+        if needed is None:  # more definitions than a read may fetch: none is fetched for it
+            publications.append(dict(publication, title=_title(kept, target), roles=[], problem="limit"))
+            continue
         cut = False
         for said in needed:
             if said in fetched:
@@ -471,20 +534,33 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
                 served = None
                 received += fault.received  # what a failed fetch had read is spent too
             time_left()
-            fetched[said], why = (None, "unreadable") if served is None else _definition(served, said, digest)
-            if why is not None:
+            fetched[said], got, why = (None, None, "unreadable") if served is None else _definition(served, said,
+                                                                                                    digest)
+            if why is None:
+                kept[said] = got
+            else:
                 failed[said] = why
-            del served
+            del served, got
         problems = {failed[said] for said in needed if said in failed} | ({"unreadable"} if not needed else set())
         problem = next((kind for kind in ("mismatch", "unreadable") if kind in problems), "limit" if cut else None)
-        selection = _roles(fetched, needed, publication["target"], whole=problem is None)
+        roles = []
         if problem is None:
-            derived_from[publication["target"]] = [said for said in needed if fetched.get(said) is not None]
-        publications.append(dict(publication, title=selection["title"],
-                                 roles=selection["roles"] if problem is None else [], problem=problem))
+            if target not in derived:
+                # Derived once per target, within what is left; what did not fit then cannot fit later.
+                derived[target] = roles_of_selection({said: kept[said] for said in needed if said in kept}, target,
+                                                     budget=ANSWER_ITEMS - used)
+            selection = derived[target]
+            if selection is None or answer_items(selection["roles"]) > ANSWER_ITEMS - used:
+                problem = "limit"
+            else:
+                used += answer_items(selection["roles"])
+                roles = selection["roles"]
+                derived_from[target] = [said for said in needed if fetched.get(said) is not None]
+        publications.append(dict(publication, title=_title(kept, target), roles=roles, problem=problem))
 
     definitions = {said: got for said, got in fetched.items() if got is not None}
     source = {"address": document["source"], "host": host, "by": document["by"], "oobi": document["oobi"],
               "introductions": document["introductions"], "catalogs": document["catalogs"]}
     return {"source": source, "checked": len(definitions), "dropped": read["dropped"],
+            "unread": len(document["publications"]) - len(shown),
             "publications": publications, "definitions": definitions, "derivedFrom": derived_from}

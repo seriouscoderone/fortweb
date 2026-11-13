@@ -93,7 +93,8 @@ class SourcesReadTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_read_returns_everything_but_the_definitions(self):
         got = await self.roling.dispatch("sources.read", {"address": "mad.seriouscoder.one"})
-        self.assertEqual(set(got), {"source", "checked", "dropped", "publications"})
+        self.assertEqual(set(got), {"source", "checked", "dropped", "unread", "publications"})
+        self.assertEqual(got["unread"], 0)
         self.assertEqual(got["checked"], 26)
         self.assertEqual(got["source"]["host"], "mad.seriouscoder.one")
         self.assertEqual(len(self.roling._LAST_READ["definitions"]), 26)

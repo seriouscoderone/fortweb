@@ -822,8 +822,9 @@ class ReadSourceTest(unittest.TestCase):
 
     def test_unreadable_wins_over_limit(self):
         payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"
-        got = self.by_target(self.read(FakeSource(self.s, fail={payment}), definitions_per_read=12))
-        # dropin-class is cut by the limit and also holds the failed definition.
+        # Every closure fits in 23 definitions (12, 19, 23), the read's 26 do not: member-class is cut by the limit
+        # and also holds the failed definition.
+        got = self.by_target(self.read(FakeSource(self.s, fail={payment}), definitions_per_read=23))
         self.assertEqual([got[t]["problem"] for t in (CLASS_BRICK, DROPIN_CLASS, MEMBER_CLASS)], ["unreadable"] * 3)
 
     def test_publication_whose_target_is_not_served_is_unreadable(self):
@@ -849,13 +850,16 @@ class ReadSourceTest(unittest.TestCase):
             real = self.s.encode_said(digest(raw))
             files[real] = raw.replace(b"#" * 44, real.encode())
         real_saids = list(files)
-        serves = [{"said": real_saids[0], "refers": real_saids[1:]}] + [{"said": said} for said in real_saids[1:]]
-        document = _doc(serves=serves, publications=[_publication(target=real_saids[0])])
+        # Two publications of 30 definitions each: the first is read whole, the second is cut after 20 more.
+        first, second = real_saids[:30], real_saids[30:]
+        serves = [{"said": first[0], "refers": first[1:]}, {"said": second[0], "refers": second[1:]}] + [
+            {"said": said} for said in first[1:] + second[1:]]
+        document = _doc(serves=serves, publications=[_publication(target=first[0]), _publication(target=second[0])])
         fake = FakeSource(self.s, document=document, files=files)
         got = self.read(fake)
         self.assertEqual(len(fake.definition_calls()), 50)
         self.assertEqual(got["checked"], 50)
-        self.assertEqual(got["publications"][0]["problem"], "limit")
+        self.assertEqual([p["problem"] for p in got["publications"]], [None, "limit"])
 
     def big_definitions(self, count: int, size: int) -> dict:
         """`count` definitions of `size` bytes each that pass their SAID check, in insertion order."""
@@ -1007,6 +1011,205 @@ class ReadSourceTest(unittest.TestCase):
         document["publications"][0]["by"] = "Eabc_-1"
         got = self.read(FakeSource(self.s, document=json.dumps(document).encode()))
         self.assertEqual([p["by"] for p in got["publications"]], ["Eabc_-1", None, None])
+
+
+
+# What a read costs is bounded (the whole-feature review's C2): publications, closures, parsing, the answer, time.
+
+def _made(body: dict) -> tuple[str, bytes]:
+    """A definition with its SAID: `body` after "d", compact; (SAID, served bytes)."""
+    text = json.dumps({"d": "#" * 44, **body}, separators=(",", ":"))
+    said = _load().encode_said(digest(text.encode()))
+    return said, text.replace("#" * 44, said).encode()
+
+
+def _items(publications: list) -> int:
+    """The answer's items: a role, a responsibility, and each reference (reliesOn, attests, outcome) count one."""
+    return sum(1 + sum(1 + len(r["reliesOn"]) + len(r["attests"]) + (r["outcome"] is not None)
+                       for r in role["responsibilities"])
+               for publication in publications for role in publication["roles"])
+
+
+class Selection:
+    """A selection with one rr, `role`, that relies `relied` times on one fact: its roles count `relied` + 2 items."""
+
+    def __init__(self, relied: int, role: str = "member"):
+        self.fact, fact = _made({"kind": "fact", "alias": "seat"})
+        self.rr, rr = _made({"kind": "rr", "role": role, "alias": "join",
+                             "rely_on": [{"said": self.fact, "as": "seat"}] * relied})
+        self.target, selection = _made({"kind": "selection", "name": "Join", "rrs": [self.rr]})
+        self.files = {self.fact: fact, self.rr: rr, self.target: selection}
+        self.serves = [{"said": self.target, "refers": [self.rr, self.fact]}, {"said": self.rr, "refers": [self.fact]},
+                       {"said": self.fact}]
+
+
+class ReadCostTest(unittest.TestCase):
+    def setUp(self):
+        self.s = _load()
+
+    def read(self, fake: FakeSource, clock=None) -> dict:
+        return asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=fake.fetch_bytes, digest=digest,
+                                              clock=clock or Clock()))
+
+    def source(self, selections: list, publications: list) -> FakeSource:
+        serves = {item["said"]: item for selection in selections for item in selection.serves}
+        files = {said: raw for selection in selections for said, raw in selection.files.items()}
+        return FakeSource(self.s, document=_doc(serves=list(serves.values()), publications=publications),
+                          files=files)
+
+    def test_the_limits(self):
+        self.assertEqual((self.s.PUBLICATIONS_PER_READ, self.s.ANSWER_ITEMS), (50, 5_000))
+
+    def test_the_first_fifty_valid_publications_are_read_and_the_rest_counted(self):
+        one = Selection(1)
+        for valid, dropped, read, unread in ((51, 0, 50, 1), (50, 0, 50, 0), (50, 3, 50, 0), (60, 2, 50, 10)):
+            with self.subTest(valid=valid, dropped=dropped):
+                # Dropped publications first: they do not use up a place.
+                publications = [_publication(target="nope")] * dropped + [
+                    _publication(target=one.target, name=f"p{n}") for n in range(valid)]
+                got = self.read(self.source([one], publications))
+                self.assertEqual([p["name"] for p in got["publications"]], [f"p{n}" for n in range(read)])
+                self.assertEqual((got["unread"], got["dropped"]["publications"]), (unread, dropped))
+                self.assertEqual({p["problem"] for p in got["publications"]}, {None})
+
+    def test_an_amplifying_source_is_bounded(self):
+        # The review's source: 400 publications of one selection whose one rr relies 15,000 times on one definition.
+        heavy = Selection(15_000)
+        fake = self.source([heavy], [_publication(target=heavy.target, name=f"p{n}") for n in range(400)])
+        parsed = []
+        parse = self.s._parse_bounded
+
+        def counting(raw):
+            parsed.append(bytes(raw))
+            return parse(raw)
+        self.s._parse_bounded = counting
+        clock = Clock()
+        reads = []
+
+        def counted_clock():
+            reads.append(1)
+            return clock()
+        got = asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=fake.fetch_bytes, digest=digest,
+                                             clock=counted_clock))
+        definitions = [raw for raw in parsed if raw != fake.document]
+        self.assertEqual(sorted(definitions), sorted(heavy.files.values()))  # each parsed once
+        self.assertEqual(len(got["publications"]), 50)
+        self.assertEqual(got["unread"], 350)
+        self.assertLessEqual(_items(got["publications"]), 5_000)
+        self.assertEqual({(p["problem"], len(p["roles"])) for p in got["publications"]}, {("limit", 0)})
+        self.assertGreaterEqual(len(reads), 50)
+
+    def test_a_publication_that_takes_exactly_what_is_left_is_shown(self):
+        small = Selection(1)  # 3 items
+        exact = Selection(5_000 - 3 - 2, role="exact")  # 4,997 items: with the small one, 5,000
+        over = Selection(5_000 - 3 - 2 + 1, role="over")  # one more
+        got = self.read(self.source([small, exact], [_publication(target=small.target, name="small"),
+                                                     _publication(target=exact.target, name="exact")]))
+        self.assertEqual([p["problem"] for p in got["publications"]], [None, None])
+        self.assertEqual(_items(got["publications"]), 5_000)
+        got = self.read(self.source([small, over], [_publication(target=small.target, name="small"),
+                                                    _publication(target=over.target, name="over"),
+                                                    _publication(target=small.target, name="small again")]))
+        self.assertEqual([(p["problem"], len(p["roles"])) for p in got["publications"]],
+                         [(None, 1), ("limit", 0), (None, 1)])
+        self.assertEqual(_items(got["publications"]), 6)
+        self.assertNotIn(over.target, got["derivedFrom"])
+
+    def chain(self, length: int) -> list[str]:
+        return [self.s.encode_said(digest(str(n).encode())) for n in range(length)]
+
+    def test_a_closure_of_more_than_fifty_definitions_is_a_limit_and_fetches_nothing(self):
+        for length, problem, fetched in ((51, "limit", 0), (50, "unreadable", 50)):
+            with self.subTest(length=length):
+                saids = self.chain(length)
+                document = _doc(serves=[{"said": said, "refers": saids[i + 1:i + 2]} for i, said in enumerate(saids)],
+                                publications=[_publication(target=saids[0])])
+                fake = FakeSource(self.s, document=document, files={})
+                got = self.read(fake)
+                self.assertEqual(got["publications"][0]["problem"], problem)
+                self.assertEqual(len(fake.definition_calls()), fetched)
+
+    def test_a_closure_is_not_followed_past_the_limit(self):
+        # The review's closure source: a chain of 4,000 served definitions, named by 4,500 publications.
+        saids = self.chain(4_000)
+        document = _doc(serves=[{"said": said, "refers": saids[i + 1:i + 2]} for i, said in enumerate(saids)],
+                        publications=[_publication(target=saids[0])] * 4_500)
+        lookups = []
+
+        class Counting(dict):
+            def __getitem__(self, key):
+                lookups.append(key)
+                return super().__getitem__(key)
+
+            def get(self, key, default=None):
+                lookups.append(key)
+                return super().get(key, default)
+
+            def __contains__(self, key):
+                lookups.append(key)
+                return super().__contains__(key)
+        read_document = self.s.read_source_document
+
+        def counting_document(raw, address):
+            read = read_document(raw, address)
+            read["document"]["serves"] = Counting(read["document"]["serves"])
+            return read
+        self.s.read_source_document = counting_document
+        fake = FakeSource(self.s, document=document, files={})
+        got = self.read(fake)
+        self.assertEqual({p["problem"] for p in got["publications"]}, {"limit"})
+        self.assertEqual(fake.definition_calls(), [])
+        self.assertLess(len(lookups), 3 * 52, len(lookups))
+
+    def test_the_clock_is_read_for_every_publication(self):
+        one = Selection(1)
+        reads = []
+        clock = Clock()
+
+        def counted():
+            reads.append(1)
+            return clock()
+        fake = self.source([one], [_publication(target=one.target, name=f"p{n}") for n in range(50)])
+        asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=fake.fetch_bytes, digest=digest,
+                                       clock=counted))
+        # Once at the start, and around the document's and the three definitions' fetches: the rest are per publication.
+        self.assertGreaterEqual(len(reads), 50)
+
+    def test_deriving_stops_when_the_read_runs_out_of_time(self):
+        one = Selection(1)
+        clock = Clock()
+
+        def slow():
+            clock.now += 2_000  # each reading of the clock costs two seconds of deriving
+            return clock.now
+        fake = self.source([one], [_publication(target=one.target, name=f"p{n}") for n in range(50)])
+        with self.assertRaises(self.s.SourceFault) as raised:
+            asyncio.run(self.s.read_source("mad.seriouscoder.one", fetch_bytes=fake.fetch_bytes, digest=digest,
+                                           clock=slow))
+        self.assertEqual(raised.exception.code, "UNREACHABLE")
+
+    def test_another_task_makes_progress_while_a_read_derives(self):
+        one = Selection(1)
+        fake = self.source([one], [_publication(target=one.target, name=f"p{n}") for n in range(50)])
+
+        async def both():
+            ticks = []
+            done = False
+
+            async def other():
+                while not done:
+                    ticks.append(1)
+                    await asyncio.sleep(0)
+            task = asyncio.ensure_future(other())
+            await asyncio.sleep(0)
+            ticks.clear()
+            await self.s.read_source("mad.seriouscoder.one", fetch_bytes=fake.fetch_bytes, digest=digest,
+                                     clock=Clock())
+            done = True
+            await task
+            return len(ticks)
+        # The fake's fetches never wait, so the other task runs only when the read lets it, between publications.
+        self.assertGreaterEqual(asyncio.run(both()), 49)
 
 
 if __name__ == "__main__":
