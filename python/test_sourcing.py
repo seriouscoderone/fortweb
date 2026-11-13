@@ -93,6 +93,10 @@ class AddressTest(unittest.TestCase):
             "example.org/a/../b", "example.org/a/./b", "example.org/a\\b", "example.org/a%2e%2e/b",
             "example.org/a%20b", "example.org/<script>", "example.org//x", "example.org/a\x00b",
             "example.org/é",
+            # Text the URL parser itself refuses (ValueError): a bracket that opens or closes no IPv6 literal, and a
+            # full-width slash, which NFKC turns into a "/" inside the host.
+            "[example.org", "example.org]", "https://[example.org/", "https://example.org]/", "https://[abc]/x",
+            "a]b.org", "example.org／path", "example.org＃x",
         ]
         for text in bad:
             with self.assertRaises(self.s.SourceFault, msg=text) as raised:
@@ -295,7 +299,9 @@ class SourceDocumentTest(unittest.TestCase):
         for oobi in ["http://witness.example.org/oobi/EABC/controller", "https://127.1/oobi/EABC",
                      "https://witness.example.org/oobi/../controller", "witness.example.org/oobi/EABC",
                      "https://witness.example.org/oobi?x=1", "https://witness.example.org:5631/oobi",
-                     " https://witness.example.org/oobi", "javascript:alert(1)"]:
+                     " https://witness.example.org/oobi", "javascript:alert(1)",
+                     # The URL parser refuses these (ValueError): the entry is dropped, the document still read.
+                     "https://[x/oobi", "https://witness.example.org]/oobi", "https://witness.example.org／oobi"]:
             with self.subTest(oobi=oobi):
                 got = self.read(_doc(oobi=oobi))
                 self.assertIsNone(got["document"]["oobi"])

@@ -79,7 +79,10 @@ def _https_parts(raw: str) -> tuple[str, str]:
     """The host and path of a plain https address, under the address rules; raises BAD_ADDRESS."""
     if any(ch.isspace() for ch in raw) or len(raw) > MAX_ADDRESS:
         raise _bad()
-    parts = urlsplit(raw)
+    try:
+        parts = urlsplit(raw)  # ValueError for a bracket that is no IPv6 literal, or a host NFKC would change
+    except ValueError:
+        raise _bad() from None
     if parts.scheme != "https" or parts.query or parts.fragment or "?" in raw or "#" in raw:
         raise _bad()
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:

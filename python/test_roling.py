@@ -606,6 +606,7 @@ class RolesStoreTest(unittest.IsolatedAsyncioTestCase):
         cases = {
             "another address": dict(address="other.example.test"),
             "an address that cannot be opened": dict(address="http://x"),
+            "an address the URL parser refuses": dict(address="[example.org"),
             "a publication the read does not have": dict(target="E" + "A" * 43),
             "a role the publication does not name": dict(role="janitor"),
         }

@@ -114,6 +114,7 @@ test.describe('Roles page', () => {
         const roles = rolesPage(page);
         const cases: Array<[string, (() => Promise<unknown>) | null, string]> = [
             ['http://x', null, NOT_AN_ADDRESS],
+            ['[example.org', null, NOT_AN_ADDRESS],
             [FIXTURE_HOST, () => routeFixtureSource(context, { cors: false }),
                 'Could not read mad.example.test: it cannot be reached, or it does not allow wallets to read it yet.'],
             ['down.example.test', () => context.route('https://down.example.test/**',
