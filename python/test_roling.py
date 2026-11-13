@@ -1166,7 +1166,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((fault.code, fault.message, fault.received),
                          ("UNREACHABLE", "Could not reach mad.example.test.", 1_234))
 
-    async def test_unexpected_error_in_one_definition_is_a_mismatch_not_a_failed_read(self):
+    async def test_unexpected_error_in_one_definition_is_unreadable_not_a_failed_read(self):
         files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
         document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
         paid_admission = "EIjETqo6CwKdjLKiUbve977olj92nuhBoy4NPywpqD1U"  # only dropin-class uses it
@@ -1181,7 +1181,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         self.stub(answer)
         got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
         problems = {p["name"]: p["problem"] for p in got["publications"]}
-        self.assertEqual(problems, {"class-brick": None, "dropin-class": "mismatch", "member-class": None})
+        self.assertEqual(problems, {"class-brick": None, "dropin-class": "unreadable", "member-class": None})
 
     async def test_read_of_definitions_over_the_file_limit_stops_at_the_byte_budget(self):
         document = (FIXTURES / "source.json").read_text("utf-8").replace(ADDRESS, URL).encode()
@@ -1194,7 +1194,7 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
         got = await self.roling.dispatch("sources.read", {"address": "mad.example.test"})
         # Four such files spend the read's 4,000,000 bytes: the other 22 definitions are never requested.
         self.assertEqual(len(js.calls), 1 + 4)
-        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 3)
+        self.assertEqual([p["problem"] for p in got["publications"]], ["unreadable"] * 3)
         self.assertEqual(got["checked"], 0)
 
     async def test_read_never_starts_a_fetch_after_sixty_seconds(self):

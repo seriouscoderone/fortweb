@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { FIXTURE_HOST, routeFixtureSource } from './fixtures/mad-source.js';
 import {
-    CLASS_ATTENDED, setUpWallet, openStartPage, NOT_AN_ADDRESS, ONE_DEFINITION, MARKUP, editSource, heldSource,
+    CLASS_ATTENDED, PAID_ADMISSION, setUpWallet, openStartPage, NOT_AN_ADDRESS, ONE_DEFINITION, MARKUP, editSource, heldSource,
     rolesPage, openAddress,
 } from './fixtures/roles.js';
 
@@ -249,6 +249,19 @@ test.describe('Roles page', () => {
         }
     });
 
+    test('a publication whose definition is not served shows its sentence and no roles', async ({ context, page }) => {
+        await routeFixtureSource(context, { missing: PAID_ADMISSION });
+        await setUpWallet(page);
+        const roles = rolesPage(page);
+        await openAddress(page, FIXTURE_HOST);
+        const dropin = roles.card('dropin-class');
+        await expect(dropin.getByText('A definition from mad.example.test could not be read.', { exact: true }))
+            .toBeVisible({ timeout: 90_000 });
+        await expect(dropin.getByRole('button', { name: 'Show roles' })).toHaveCount(0);
+        // The other two do not use it.
+        await expect(roles.card('class-brick').getByRole('button', { name: 'Show roles' })).toHaveCount(1);
+    });
+
     test('a publication past the read\'s limit shows its sentence and no roles', async ({ context, page }) => {
         // Fifty served definitions that do not exist use up the definitions one read fetches; dropin-class, listed
         // after them, still needs its own and is cut off.
@@ -269,7 +282,7 @@ test.describe('Roles page', () => {
             { exact: true })).toBeVisible({ timeout: 90_000 });
         await expect(dropin.getByRole('button', { name: 'Show roles' })).toHaveCount(0);
         await expect(roles.card('fifty-missing').getByText(
-            'A definition from mad.example.test does not match its identifier.', { exact: true })).toBeVisible();
+            'A definition from mad.example.test could not be read.', { exact: true })).toBeVisible();
     });
 
     test('what a source says about itself is shown as unverified', async ({ context, page }) => {

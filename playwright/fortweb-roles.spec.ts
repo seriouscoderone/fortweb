@@ -68,7 +68,7 @@ test.describe('sources.read', () => {
         const outcome = await readSource(page, FIXTURE_HOST);
         expect(outcome.ok && outcome.result.checked).toBe(0);
         expect(outcome.ok && outcome.result.publications.map((p) => [p.name, p.problem, p.roles])).toEqual([
-            ['class-brick', 'mismatch', []], ['dropin-class', 'mismatch', []], ['member-class', 'mismatch', []],
+            ['class-brick', 'unreadable', []], ['dropin-class', 'unreadable', []], ['member-class', 'unreadable', []],
         ]);
         // Every definition the publications need (all 26 the source serves), each exactly once.
         expect(requests.definitions.length).toBe(26);
@@ -122,9 +122,9 @@ test.describe('sources.read', () => {
             'EEfawOeTW43nlaZXFYBxjw5XQuLkbm6Jdw-L1EbAXviK',
             'EEnCEVn-d6pEqEbX2tdKpaZnuldiha_x4l0FZdeQXhU-',
         ]);
-        // All three publications use at least one of those four, so each is a mismatch and nothing was checked.
+        // All three publications use at least one of those four, so none can be read and nothing was checked.
         expect(outcome.ok && outcome.result.publications.map((p) => [p.name, p.problem, p.roles])).toEqual([
-            ['class-brick', 'mismatch', []], ['dropin-class', 'mismatch', []], ['member-class', 'mismatch', []],
+            ['class-brick', 'unreadable', []], ['dropin-class', 'unreadable', []], ['member-class', 'unreadable', []],
         ]);
         expect(outcome.ok && outcome.result.checked).toBe(0);
     });

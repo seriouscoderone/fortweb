@@ -42,7 +42,7 @@ export interface PublicationView {
     by: string | null;
     title: string;
     roles: RoleView[];
-    problem: null | "mismatch" | "limit";
+    problem: null | "mismatch" | "unreadable" | "limit";
 }
 
 /** What `sources.read` answers. */
@@ -179,8 +179,11 @@ function responsibilityText(responsibility: Responsibility): string {
 }
 
 function problemText(problem: PublicationView["problem"], host: string): string {
-    return problem === "limit"
-        ? `${host} publishes more than the wallet reads in one go.`
+    if (problem === "limit") {
+        return `${host} publishes more than the wallet reads in one go.`;
+    }
+    return problem === "unreadable"
+        ? `A definition from ${host} could not be read.`
         : `A definition from ${host} does not match its identifier.`;
 }
 

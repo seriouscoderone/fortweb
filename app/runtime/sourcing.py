@@ -381,19 +381,21 @@ def roles_of_selection(definitions: dict, target: str) -> dict:
 
 # Reading a source: the document, then the definitions its publications need, each checked against its SAID.
 
-def _definition(raw: bytes, said: str, digest) -> str | None:
-    """The served text of a definition that passes its SAID check and is bounded JSON; None otherwise.
+def _definition(raw: bytes, said: str, digest) -> tuple[str | None, str | None]:
+    """(the served text, None) for a definition that passes its SAID check and is bounded JSON; otherwise (None, its
+    problem): "mismatch" when the bytes fail the SAID check, "unreadable" when they pass it but are not JSON the
+    wallet accepts.
 
     The parsed object is not kept: a read holds only texts, and parses one publication's definitions while deriving
     its roles.
     """
     if not check_said(raw, said, digest=digest):
-        return None
+        return None, "mismatch"
     try:
         _parse_bounded(raw)
-        return raw.decode("utf-8")
+        return raw.decode("utf-8"), None
     except (UnicodeDecodeError, ValueError):
-        return None
+        return None, "unreadable"
 
 
 def _roles(texts: dict, needed: list[str], target: str, *, whole: bool) -> dict:
@@ -412,12 +414,14 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     `fetch_bytes(url, timeout_ms)` is awaited and returns the bytes or raises SourceFault, whose `received` says how
     many body bytes it had read; `digest(bytes)` is Blake3-256; `clock()` gives milliseconds. A fault on the address
     or the source document stops the read, and so does running out of time (UNREACHABLE); the clock is checked
-    before and after every fetch. A definition that cannot be fetched, fails its SAID check or is not JSON does not
-    stop the read: every publication whose closure holds it gets problem "mismatch". Once `definitions_per_read`
-    definitions have been fetched, or the bytes received in this read reach `read_bytes` (the source document, every
-    definition returned, and what the fetch of a failed definition had read), nothing more is fetched, and a
-    publication that still needs one gets problem "limit" (unless one of its definitions already failed, which is
-    "mismatch"). Each definition is fetched at most once. A publication with a problem has no roles.
+    before and after every fetch. A definition that fails does not stop the read: every publication whose closure
+    holds it gets a problem, "mismatch" when its bytes fail the SAID check, "unreadable" when it could not be fetched
+    or is not JSON the wallet accepts; a publication whose target the source does not serve is "unreadable" too.
+    Once `definitions_per_read` definitions have been fetched, or the bytes received in this read reach `read_bytes`
+    (the source document, every definition returned, and what the fetch of a failed definition had read), nothing
+    more is fetched, and a publication that still needs one gets problem "limit". When several apply, "mismatch"
+    comes before "unreadable", and both before "limit". Each definition is fetched at most once. A publication with
+    a problem has no roles.
 
     Besides what the page is shown, the result holds `definitions` (SAID -> checked text) and `derivedFrom` (target
     -> the SAIDs of the checked definitions its roles were derived from, for each target without a problem).
@@ -441,6 +445,7 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
     serves = document["serves"]
 
     fetched: dict[str, str | None] = {}  # said -> checked text, or None when it failed
+    failed: dict[str, str] = {}  # said -> "mismatch" or "unreadable", for each one that failed
     publications = []
     derived_from: dict[str, list[str]] = {}  # target -> the checked SAIDs its roles were derived from
     for publication in document["publications"]:
@@ -459,10 +464,12 @@ async def read_source(text: str, *, fetch_bytes, digest, clock, definitions_per_
                 served = None
                 received += fault.received  # what a failed fetch had read is spent too
             time_left()
-            fetched[said] = None if served is None else _definition(served, said, digest)
+            fetched[said], why = (None, "unreadable") if served is None else _definition(served, said, digest)
+            if why is not None:
+                failed[said] = why
             del served
-        failed = any(said in fetched and fetched[said] is None for said in needed)
-        problem = "mismatch" if not needed or failed else "limit" if cut else None
+        problems = {failed[said] for said in needed if said in failed} | ({"unreadable"} if not needed else set())
+        problem = next((kind for kind in ("mismatch", "unreadable") if kind in problems), "limit" if cut else None)
         selection = _roles(fetched, needed, publication["target"], whole=problem is None)
         if problem is None:
             derived_from[publication["target"]] = [said for said in needed if fetched.get(said) is not None]

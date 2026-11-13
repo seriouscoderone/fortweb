@@ -677,33 +677,33 @@ class ReadSourceTest(unittest.TestCase):
         self.assertNotIn(CLASS_ATTENDED, got["definitions"])
         self.assertEqual([(p["problem"], p["roles"]) for p in got["publications"]], [("mismatch", [])] * 3)
 
-    def test_unavailable_definition_is_a_mismatch_not_a_failed_read(self):
+    def test_unavailable_definition_is_unreadable_not_a_failed_read(self):
         fake = FakeSource(self.s, fail={PAID_ADMISSION})
         got = self.by_target(self.read(fake))
-        self.assertEqual((got[DROPIN_CLASS]["problem"], got[DROPIN_CLASS]["roles"]), ("mismatch", []))
+        self.assertEqual((got[DROPIN_CLASS]["problem"], got[DROPIN_CLASS]["roles"]), ("unreadable", []))
         self.assertIsNone(got[CLASS_BRICK]["problem"])
         self.assertIsNone(got[MEMBER_CLASS]["problem"])
         self.assertEqual(fake.definition_calls().count(self.s.definition_address(BASE, PAID_ADMISSION)), 1)
 
-    def test_definition_that_is_not_json_is_a_mismatch(self):
+    def test_definition_that_is_not_json_is_unreadable(self):
         # Bytes that pass the SAID check but are not JSON: the target SAID inside non-JSON text.
         raw = b"not json " + b"#" * 44
         said = self.s.encode_said(digest(raw))
         raw = raw.replace(b"#" * 44, said.encode())
         document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
         got = self.read(FakeSource(self.s, document=document, files={said: raw}))
-        self.assertEqual(got["publications"][0]["problem"], "mismatch")
+        self.assertEqual(got["publications"][0]["problem"], "unreadable")
         self.assertEqual(got["checked"], 0)
 
-    def test_definition_that_is_not_utf8_is_a_mismatch(self):
+    def test_definition_that_is_not_utf8_is_unreadable(self):
         raw = b'{"d":"' + b"#" * 44 + b'","x":"\xff"}'
         said = self.s.encode_said(digest(raw))
         raw = raw.replace(b"#" * 44, said.encode())
         document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
         got = self.read(FakeSource(self.s, document=document, files={said: raw}))
-        self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
+        self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("unreadable", 0))
 
-    def test_definition_with_a_lone_surrogate_is_a_mismatch(self):
+    def test_definition_with_a_lone_surrogate_is_unreadable(self):
         for text in (b'"x":"a\\ud83d"', b'"x\\udc00":1'):
             with self.subTest(text=text):
                 raw = b'{"d":"' + b"#" * 44 + b'",' + text + b"}"
@@ -711,7 +711,45 @@ class ReadSourceTest(unittest.TestCase):
                 raw = raw.replace(b"#" * 44, said.encode())
                 document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
                 got = self.read(FakeSource(self.s, document=document, files={said: raw}))
-                self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
+                self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("unreadable", 0))
+
+    def selection_of(self, raw: bytes) -> tuple[str, bytes]:
+        """A definition whose bytes are `raw` with its SAID in place of the 44 '#', and the document of one
+        publication of it."""
+        said = self.s.encode_said(digest(raw))
+        return said, raw.replace(b"#" * 44, said.encode())
+
+    def test_each_cause_of_a_definition_that_cannot_be_read_is_unreadable(self):
+        deep = b'{"d":"' + b"#" * 44 + b'","x":' + b"[" * 64 + b"]" * 64 + b"}"
+        causes = {
+            "its fetch fails": (b'{"d":"' + b"#" * 44 + b'"}', True),
+            "not JSON": (b"not json " + b"#" * 44, False),
+            "nested too deep": (deep, False),
+            "a lone surrogate": (b'{"d":"' + b"#" * 44 + b'","x":"\\ud83d"}', False),
+        }
+        for cause, (raw, fails) in causes.items():
+            with self.subTest(cause=cause):
+                said, served = self.selection_of(raw)
+                document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
+                fake = FakeSource(self.s, document=document, files={said: served}, fail={said} if fails else ())
+                got = self.read(fake)
+                self.assertEqual((got["publications"][0]["problem"], got["publications"][0]["roles"], got["checked"]),
+                                 ("unreadable", [], 0))
+
+    def test_a_definition_whose_bytes_fail_their_said_is_a_mismatch(self):
+        said, served = self.selection_of(b'{"d":"' + b"#" * 44 + b'","kind":"selection"}')
+        document = _doc(serves=[{"said": said}], publications=[_publication(target=said)])
+        got = self.read(FakeSource(self.s, document=document, files={said: served.replace(b"selection", b"Selection")}))
+        self.assertEqual((got["publications"][0]["problem"], got["checked"]), ("mismatch", 0))
+
+    def test_mismatch_wins_over_unreadable(self):
+        # dropin-class needs one tampered definition (only it uses PAID_ADMISSION) and one that cannot be fetched
+        # (all three use CLASS_ATTENDED).
+        files = {f.stem: f.read_bytes() for f in (FIXTURES / "compact").glob("*.json")}
+        files[PAID_ADMISSION] = files[PAID_ADMISSION].replace(b"paid-admission", b"paid-admissiom", 1)
+        got = self.by_target(self.read(FakeSource(self.s, files=files, fail={CLASS_ATTENDED})))
+        self.assertEqual(got[DROPIN_CLASS]["problem"], "mismatch")
+        self.assertEqual([got[t]["problem"] for t in (CLASS_BRICK, MEMBER_CLASS)], ["unreadable"] * 2)
 
     def test_limit_counts_failed_fetch_attempts(self):
         payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"  # in all three closures
@@ -719,17 +757,17 @@ class ReadSourceTest(unittest.TestCase):
         self.read(fake, definitions_per_read=12)
         self.assertEqual(len(fake.definition_calls()), 12)
 
-    def test_mismatch_wins_over_limit(self):
+    def test_unreadable_wins_over_limit(self):
         payment = "ECru8k3CerlcJF0Khe0EOubRaA4U4APPGqOdvkzNR0L1"
         got = self.by_target(self.read(FakeSource(self.s, fail={payment}), definitions_per_read=12))
         # dropin-class is cut by the limit and also holds the failed definition.
-        self.assertEqual([got[t]["problem"] for t in (CLASS_BRICK, DROPIN_CLASS, MEMBER_CLASS)], ["mismatch"] * 3)
+        self.assertEqual([got[t]["problem"] for t in (CLASS_BRICK, DROPIN_CLASS, MEMBER_CLASS)], ["unreadable"] * 3)
 
-    def test_publication_whose_target_is_not_served_is_a_mismatch(self):
+    def test_publication_whose_target_is_not_served_is_unreadable(self):
         document = _doc(serves=[], publications=[_publication(target=SAID_A)])
         fake = FakeSource(self.s, document=document, files={})
         got = self.read(fake)
-        self.assertEqual((got["publications"][0]["problem"], got["publications"][0]["roles"]), ("mismatch", []))
+        self.assertEqual((got["publications"][0]["problem"], got["publications"][0]["roles"]), ("unreadable", []))
         self.assertEqual(fake.definition_calls(), [])
 
     def test_limit_cuts_the_read_and_fetches_nothing_beyond_it(self):
@@ -793,7 +831,7 @@ class ReadSourceTest(unittest.TestCase):
         self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids[:4]])
         self.assertEqual(got["publications"][4]["problem"], "limit")
 
-    def test_mismatch_wins_over_the_byte_budget(self):
+    def test_unreadable_wins_over_the_byte_budget(self):
         files = self.big_definitions(7, 900_000)
         saids = list(files)
         # This fake fails `failing` before any body byte arrives, so only saids[1:6] spend the budget.
@@ -804,9 +842,9 @@ class ReadSourceTest(unittest.TestCase):
         fake = FakeSource(self.s, document=document, files=files, fail={failing})
         got = self.read(fake)
         self.assertNotIn(self.s.definition_address(BASE, cut), fake.definition_calls())
-        # The last publication needs the failed definition and one cut by the budget: mismatch wins.
-        self.assertEqual(got["publications"][6]["problem"], "mismatch")
-        self.assertEqual(got["publications"][0]["problem"], "mismatch")
+        # The last publication needs the failed definition and one cut by the budget: unreadable wins.
+        self.assertEqual(got["publications"][6]["problem"], "unreadable")
+        self.assertEqual(got["publications"][0]["problem"], "unreadable")
 
     def test_byte_budget_counts_the_bytes_received_by_failed_definitions(self):
         # A hostile source: every definition is just over the file limit, so each fetch fails after 1,000,001 bytes.
@@ -818,8 +856,9 @@ class ReadSourceTest(unittest.TestCase):
         got = self.read(fake)
         # Four such fetches spend the budget (4,000,004 bytes): the other 46 definitions are never requested.
         self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids[:4]])
-        # Requested and failed: mismatch. Only cut: limit. The last one is cut and also needs saids[0], which failed.
-        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 4 + ["limit"] * 45 + ["mismatch"])
+        # Requested and failed: unreadable. Only cut: limit. The last one is cut and also needs saids[0], which failed.
+        self.assertEqual([p["problem"] for p in got["publications"]],
+                         ["unreadable"] * 4 + ["limit"] * 45 + ["unreadable"])
         self.assertEqual((got["checked"], got["definitions"]), (0, {}))
 
     def test_byte_budget_adds_up_definitions_that_arrived_and_ones_that_failed(self):
@@ -837,7 +876,7 @@ class ReadSourceTest(unittest.TestCase):
         # fetch them both.
         self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in order[:6]])
         self.assertEqual([p["problem"] for p in got["publications"]],
-                         [None, "mismatch", None, "mismatch", "mismatch", None, "limit", "limit"])
+                         [None, "unreadable", None, "unreadable", "unreadable", None, "limit", "limit"])
         self.assertEqual(got["checked"], 3)
 
     def test_faults_that_received_nothing_spend_none_of_the_byte_budget(self):
@@ -848,7 +887,7 @@ class ReadSourceTest(unittest.TestCase):
         got = self.read(fake, read_bytes=len(document) + 1)
         # The document leaves one byte of the budget, and ten faults that received nothing do not spend it.
         self.assertEqual(fake.definition_calls(), [self.s.definition_address(BASE, said) for said in saids])
-        self.assertEqual([p["problem"] for p in got["publications"]], ["mismatch"] * 10)
+        self.assertEqual([p["problem"] for p in got["publications"]], ["unreadable"] * 10)
 
     def test_roles_of_every_fixture_publication_match_role_derivation(self):
         got = self.read(FakeSource(self.s))

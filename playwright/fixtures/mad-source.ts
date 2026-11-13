@@ -23,6 +23,8 @@ export interface FixtureSourceOptions {
     definitionType?: string;
     /** Serve this definition with one byte changed. */
     tamper?: string;
+    /** Answer this definition, which the source serves, with 404. */
+    missing?: string;
     /** Serve a source document of 1,000,001 bytes. */
     oversize?: boolean;
     /** Serve every definition as 1,000,001 bytes. */
@@ -122,7 +124,7 @@ export async function routeFixtureSource(
         if (said !== undefined) {
             requests.definitions.push(said);
         }
-        const body = said === undefined ? undefined : served.get(said);
+        const body = said === undefined || said === options.missing ? undefined : served.get(said);
         if (body === undefined) {
             await route.fulfill({ status: 404, headers, body: '' });
             return;
