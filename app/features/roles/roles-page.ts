@@ -245,7 +245,7 @@ function tidy(text: string): string {
 
 /** A name as it looks: the joiners (U+200C, U+200D), which do not show, left out, and white space tidied. */
 function looks(name: string): string {
-    return tidy(name.replace(/[‌‍]/gu, ""));
+    return tidy(name.replace(/[\u200c\u200d]/gu, ""));
 }
 
 /**
