@@ -42,6 +42,27 @@ test.describe('The take-on dialog', () => {
         await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('cashier 2');
     });
 
+    test('the name offered is numbered when it differs from a taken alias only by a joiner', async ({ context, page }) => {
+        // A publication whose one role is "cashier" followed by a zero-width joiner, which does not show.
+        const [rr, rrBytes] = definition({ kind: 'rr', alias: 'till', role: 'cashier‍' });
+        const [selection, selectionBytes] = definition({ kind: 'selection', name: 'Joined', rrs: [rr] });
+        await routeFixtureSource(context, {
+            extra: new Map([[rr, rrBytes], [selection, selectionBytes]]),
+            edit: editSource((document) => {
+                document.serves.push({ said: selection, refers: [rr] }, { said: rr, refers: [] });
+                document.publications.push({ ...document.publications[1], target: selection, name: 'joined' });
+            }),
+        });
+        await setUpWallet(page);
+        await showDropinRoles(page);
+        await takeOnWithNewIdentifier(page, 'cashier');
+        const joined = rolesPage(page).card('joined');
+        await joined.getByRole('button', { name: 'Show roles' }).click();
+        await joined.locator('[data-roles-list] button').click();
+        const dialog = page.locator('[role="dialog"]:not([inert])');
+        await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('cashier‍ 2');
+    });
+
     test('an identifier name that is taken is shown in the dialog, which stays open', async ({ context, page }) => {
         await routeFixtureSource(context);
         await setUpWallet(page);

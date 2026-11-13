@@ -238,15 +238,25 @@ function dutiesList(responsibilities: Responsibility[], className: string): HTML
     return duties;
 }
 
+/** White space tidied: none at either end, one space for each run inside. */
+function tidy(text: string): string {
+    return text.trim().replace(/\s+/gu, " ");
+}
+
+/** A name as it looks: the joiners (U+200C, U+200D), which do not show, left out, and white space tidied. */
+function looks(name: string): string {
+    return tidy(name.replace(/[‌‍]/gu, ""));
+}
+
 /**
- * The role's name with its white space tidied (none at either end, one space for each run inside), numbered when an
- * identifier of the vault already has it: cashier, cashier 2, cashier 3...
+ * The role's name with its white space tidied (joiners kept), numbered when an identifier of the vault already has
+ * a name that looks the same, joiners left out on both sides: cashier, cashier 2, cashier 3...
  */
 function freeAlias(role: string, identifiers: VaultIdentifier[]): string {
-    const taken = new Set(identifiers.map((identifier) => identifier.alias));
-    const name = role.trim().replace(/\s+/gu, " ");
+    const taken = new Set(identifiers.map((identifier) => looks(identifier.alias)));
+    const name = tidy(role);
     let alias = name;
-    for (let number = 2; taken.has(alias); number += 1) {
+    for (let number = 2; taken.has(looks(alias)); number += 1) {
         alias = `${name} ${number}`;
     }
     return alias;
