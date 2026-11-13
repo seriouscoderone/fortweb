@@ -19,6 +19,8 @@ export interface FixtureSourceOptions {
     cors?: boolean;
     /** false: answer the definitions (only) without allowing the wallet's origin. */
     definitionsCors?: boolean;
+    /** The content type the definitions are served with (default application/json). */
+    definitionType?: string;
     /** Serve this definition with one byte changed. */
     tamper?: string;
     /** Serve a source document of 1,000,001 bytes. */
@@ -126,7 +128,8 @@ export async function routeFixtureSource(
             return;
         }
         const refused = options.definitionsCors === false ? { 'access-control-allow-origin': NOT_THE_WALLET } : {};
-        await route.fulfill({ status: 200, headers: { ...headers, ...refused },
+        const type = options.definitionType === undefined ? {} : { 'content-type': options.definitionType };
+        await route.fulfill({ status: 200, headers: { ...headers, ...refused, ...type },
             body: options.oversizeDefinitions ? oversized(body) : body });
     });
     return requests;

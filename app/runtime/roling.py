@@ -137,6 +137,15 @@ async def _fetch_bytes(url: str, timeout_ms: int) -> bytes:
         raise sourcing.SourceFault("UNREACHABLE", f"Could not reach {host}.", received=count.received) from None
 
 
+def _is_json_type(header) -> bool:
+    """mad-discovery's rule (src/fetch.ts isJsonType): the type before any parameter, trimmed and lower-cased, is
+    application/json or ends with +json."""
+    if not header:
+        return False
+    kind = str(header).split(";", 1)[0].strip().lower()
+    return kind == "application/json" or kind.endswith("+json")
+
+
 async def _fetch_checked(url: str, timeout_ms: int, host: str, count: _BodyCount) -> bytes:
     started = _clock()
     response, controller, timer, fired = await _fetch_or_none(url, timeout_ms)
@@ -148,8 +157,8 @@ async def _fetch_checked(url: str, timeout_ms: int, host: str, count: _BodyCount
         raise sourcing.SourceFault(
             "NOT_READABLE", f"Could not read {host}: it cannot be reached, or it does not allow wallets to read it yet.")
     try:
-        content_type = str(response.headers.get("content-type") or "").lower()
-        if int(response.status) != 200 or not content_type.startswith("application/json") or response.body is None:
+        if int(response.status) != 200 or not _is_json_type(response.headers.get("content-type")) \
+                or response.body is None:
             raise sourcing.SourceFault("BAD_SOURCE", f"{host} did not return a valid source.")
         reader = response.body.getReader()
         chunks = []

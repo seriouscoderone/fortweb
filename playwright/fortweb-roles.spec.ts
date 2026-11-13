@@ -75,6 +75,14 @@ test.describe('sources.read', () => {
         expect(new Set(requests.definitions).size).toBe(26);
     });
 
+    test('definitions served as application/schema+json are read', async ({ context, page }) => {
+        await routeFixtureSource(context, { definitionType: 'application/schema+json' });
+        await openStartPage(page);
+        const outcome = await readSource(page, FIXTURE_HOST);
+        expect(outcome.ok && outcome.result.checked).toBe(26);
+        expect(outcome.ok && outcome.result.publications.map((p) => p.problem)).toEqual([null, null, null]);
+    });
+
     test('a tampered definition marks exactly the publications that use it', async ({ context, page }) => {
         await routeFixtureSource(context, { tamper: CLASS_ATTENDED });
         await setUpWallet(page);

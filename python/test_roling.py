@@ -883,6 +883,23 @@ class FetchBytesTest(unittest.IsolatedAsyncioTestCase):
                                  ("BAD_SOURCE", "mad.example.test did not return a valid source."))
                 self.assertEqual(served.reader.reads, 0)
 
+    async def test_content_type_is_json_as_mad_discovery_reads_it(self):
+        accepted = ("application/json", "application/json; charset=utf-8", "Application/JSON",
+                    "application/schema+json", "application/ld+json;profile=x", " application/json ;q=1")
+        refused = ("application/json-seq", "text/json", "text/html", "", None, "application/jsonx")
+        for content_type in accepted + refused:
+            with self.subTest(content_type=content_type):
+                served = response(content_type=content_type)
+
+                async def answer(url, options):
+                    return served
+                self.stub(answer)
+                if content_type in accepted:
+                    self.assertEqual(await self.roling._fetch_bytes(URL, 10_000), b"{}")
+                else:
+                    self.assertEqual((await self.fault()).code, "BAD_SOURCE")
+                    self.assertEqual(served.reader.reads, 0)
+
     async def test_content_type_other_than_json_is_refused(self):
         for content_type in ("text/html", "text/html; charset=utf-8", "application/javascript", None):
             with self.subTest(content_type=content_type):
