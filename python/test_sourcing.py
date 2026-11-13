@@ -577,6 +577,29 @@ class RolesTest(unittest.TestCase):
                 self.assertEqual([role["role"] for role in got["roles"]], ["ok"])
                 self.assertEqual([r["said"] for r in got["roles"][0]["responsibilities"]], [SAID_D])
 
+    def test_a_role_named_only_with_joiners_and_white_space_is_ignored(self):
+        for text in ("\u200d", "\u200c \u200d", "\u200c", " \u200d\u00a0"):
+            for form in ("parsed", "derivable"):
+                with self.subTest(text=ascii(text), form=form):
+                    defs = self.bounded_defs("ok")
+                    defs[SAID_B]["role"] = text
+                    if form == "derivable":
+                        defs = {said: self.s.derivable(found) for said, found in defs.items()}
+                    got = self.s.roles_of_selection(defs, SAID_A)
+                    self.assertEqual([role["role"] for role in got["roles"]], ["ok"])
+                    self.assertEqual([r["said"] for r in got["roles"][0]["responsibilities"]], [SAID_D])
+
+    def test_a_role_with_a_joiner_inside_a_name_that_shows_is_kept(self):
+        for text in ("a\u200db", KEPT_EXAMPLES[1], "\U0001F469\u200d\U0001F4BB"):
+            for form in ("parsed", "derivable"):
+                with self.subTest(text=ascii(text), form=form):
+                    defs = self.bounded_defs("ok")
+                    defs[SAID_B]["role"] = text
+                    if form == "derivable":
+                        defs = {said: self.s.derivable(found) for said, found in defs.items()}
+                    got = self.s.roles_of_selection(defs, SAID_A)
+                    self.assertEqual([role["role"] for role in got["roles"]], sorted(["ok", text]))
+
     def test_an_unusable_as_drops_only_that_item(self):
         defs = self.bounded_defs("ok")
         defs[SAID_B]["rely_on"] = [{"said": SAID_C, "as": "x" * 201}, {"said": SAID_C, "as": "seat"}]

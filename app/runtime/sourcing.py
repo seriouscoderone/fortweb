@@ -343,12 +343,22 @@ def _display_name(value) -> bool:
     return _text(value, DISPLAY_NAME)
 
 
+# The joiners Ruling 13 allows inside a string. They do not show on their own.
+JOINERS = frozenset("\u200c\u200d")
+
+
+def _role_name(value) -> bool:
+    """A role's name: a display name with at least one character that is neither white space nor a joiner, so that
+    it shows."""
+    return _display_name(value) and any(not ch.isspace() and ch not in JOINERS for ch in value)
+
+
 def roles_of_selection(definitions: dict, target: str, *, budget: int | None = None) -> dict | None:
     """Who does what in the selection at `target`: roles by name, each with its responsibilities in `rrs` order.
 
     Anything of the wrong shape is ignored. A string is used only if it is at most DISPLAY_NAME UTF-16 units and
     has no FORBIDDEN character (Ruling 13); any other is treated as a member of the wrong type: an rr whose `role`
-    is not usable, or has no character that is not white space, is ignored, a `rely_on` item whose `as` is not
+    is not usable, or has no character that is neither white space nor a joiner, is ignored, a `rely_on` item whose `as` is not
     usable is ignored, and an unusable name, alias or kind is "". A referenced SAID with no definition gets alias ""
     and kind "".
 
@@ -377,8 +387,7 @@ def roles_of_selection(definitions: dict, target: str, *, budget: int | None = N
     used = 0
     for said in dict.fromkeys(item for item in selection["rrs"] if is_said(item)):  # once each, first order kept
         rr = definitions.get(said)
-        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _display_name(rr.get("role")) \
-                or not rr["role"].strip():
+        if not isinstance(rr, dict) or rr.get("kind") != "rr" or not _role_name(rr.get("role")):
             continue
         relied = [item for item in items(rr, "rely_on")
                   if isinstance(item, dict) and is_said(item.get("said")) and _display_name(item.get("as"))]
@@ -413,9 +422,8 @@ def derivable(definition) -> dict:
     if not isinstance(definition, dict):
         return {}
     kept = {name: definition[name] for name in ("kind", "alias", "name") if _display_name(definition.get(name))}
-    role = definition.get("role")
-    if _display_name(role) and role.strip():
-        kept["role"] = role
+    if _role_name(definition.get("role")):
+        kept["role"] = definition["role"]
     if isinstance(definition.get("rrs"), list):
         kept["rrs"] = list(dict.fromkeys(item for item in definition["rrs"] if is_said(item)))
     if isinstance(definition.get("rely_on"), list):
