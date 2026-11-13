@@ -1122,6 +1122,38 @@ class ReadCostTest(unittest.TestCase):
         self.assertEqual({(p["problem"], len(p["roles"])) for p in got["publications"]}, {("limit", 0)})
         self.assertGreaterEqual(len(reads), 50)
 
+    def test_fifty_publications_of_one_target_derive_its_roles_once(self):
+        one = Selection(1)
+        derivations = []
+        derive = self.s.roles_of_selection
+
+        def counting(definitions, target, **options):
+            if one.rr in definitions:  # a derivation of roles (a title is read from the selection alone)
+                derivations.append(target)
+            return derive(definitions, target, **options)
+        self.s.roles_of_selection = counting
+        got = self.read(self.source([one], [_publication(target=one.target, name=f"p{n}") for n in range(50)]))
+        self.assertEqual([(p["problem"], len(p["roles"])) for p in got["publications"]], [(None, 1)] * 50)
+        self.assertEqual(derivations, [one.target])
+
+    def test_a_derivation_stops_once_it_is_over_its_budget(self):
+        # One responsibility that relies 15,000 times on one definition, and a budget of ten items.
+        heavy = Selection(15_000)
+        lookups = []
+
+        class Counting(dict):
+            def get(self, key, default=None):
+                lookups.append(key)
+                return super().get(key, default)
+        definitions = Counting({said: json.loads(raw) for said, raw in heavy.files.items()})
+        self.assertIsNone(self.s.roles_of_selection(definitions, heavy.target, budget=10))
+        # The selection and its rr are looked up; none of the 15,000 references is.
+        self.assertEqual(lookups, [heavy.target, heavy.rr])
+        # Without a budget the same derivation goes through all of them.
+        lookups.clear()
+        self.assertEqual(_items([{"roles": self.s.roles_of_selection(definitions, heavy.target)["roles"]}]), 15_002)
+        self.assertEqual(lookups.count(heavy.fact), 15_000)
+
     def test_a_publication_that_takes_exactly_what_is_left_is_shown(self):
         small = Selection(1)  # 3 items
         exact = Selection(5_000 - 3 - 2, role="exact")  # 4,997 items: with the small one, 5,000
