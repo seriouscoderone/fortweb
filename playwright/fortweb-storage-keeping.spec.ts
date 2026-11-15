@@ -36,6 +36,15 @@ async function browserThatWillNotSay(page: Page): Promise<void> {
     });
 }
 
+/** The browser never settles a read of whether it keeps the storage. */
+async function browserThatNeverAnswers(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+        StorageManager.prototype.persisted = function persisted(): Promise<boolean> {
+            return new Promise<boolean>(() => {});
+        };
+    });
+}
+
 /** From the moment `throwOnLookUp(page)` is called, merely looking up `navigator.storage` throws. */
 async function browserWhoseStorageLookUpCanThrow(page: Page): Promise<void> {
     await page.addInitScript(() => {
@@ -133,6 +142,15 @@ test.describe('Keeping the wallet\'s storage', () => {
         await browserThatWillNotSay(page);
         await setUpWallet(page);
         await expect.poll(async () => (await asked(page)).asked).toBe(1);
+        await openSettings(page);
+        await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
+        expect((await asked(page)).asked).toBe(1);
+    });
+
+    test('Settings is drawn, saying the browser does not say, when the browser never answers the read', async ({ page }) => {
+        await browserThatSays(page, true);
+        await browserThatNeverAnswers(page);
+        await setUpWallet(page);
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
         expect((await asked(page)).asked).toBe(1);

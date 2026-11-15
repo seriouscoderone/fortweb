@@ -33,7 +33,21 @@ export function askToKeepStorage(): Promise<StorageKept> {
     return answer((storage) => (typeof storage.persist === "function" ? storage.persist() : Promise.reject()));
 }
 
-/** What the browser says now, without asking for anything. */
+/** How long Settings waits for the browser's answer before it says the browser does not say. */
+const READ_LIMIT_MS = 2_000;
+
+/**
+ * What the browser says now, without asking for anything. A browser that has not answered within two seconds does
+ * not say.
+ */
 export function storageKept(): Promise<StorageKept> {
-    return answer((storage) => (typeof storage.persisted === "function" ? storage.persisted() : Promise.reject()));
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve("unknown"), READ_LIMIT_MS);
+        void answer((storage) =>
+            typeof storage.persisted === "function" ? storage.persisted() : Promise.reject(),
+        ).then((kept) => {
+            clearTimeout(timer);
+            resolve(kept);
+        });
+    });
 }
