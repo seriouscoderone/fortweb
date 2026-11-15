@@ -59,6 +59,51 @@ class ResolveTest(unittest.TestCase):
             self.skipTest("this system makes no symbolic links")
         self.assertIsNone(start_wallet.resolve(self.root, "/app/leak.txt"))
 
+    def link(self, name, points_at, directory=False):
+        link = self.root / "app" / name
+        try:
+            link.symlink_to(points_at, target_is_directory=directory)
+        except (OSError, NotImplementedError):
+            self.skipTest("this system makes no symbolic links")
+
+    def test_a_part_with_a_drive_letter_names_nothing(self):
+        # Under Windows path rules "C:.." is ".." on that drive and "C:name" is "name" at the folder's top.
+        for target in ("/app/C:../README.txt", "/app/c:../README.txt", "/app/C%3a../README.txt", "/app/C:README.txt",
+                       "/app/C:/README.txt", "/app/C:../start-wallet.py", "/wheels/C:../README.txt"):
+            with self.subTest(target=target):
+                self.assertIsNone(start_wallet.resolve(self.root, target))
+
+    def test_a_real_folder_whose_name_holds_a_colon_names_nothing(self):
+        if os.name == "nt":
+            self.skipTest("Windows makes no folder whose name holds a colon")
+        (self.root / "app" / "C:").mkdir()
+        (self.root / "app" / "C:" / "x.txt").write_text("x")
+        self.assertIsNone(start_wallet.resolve(self.root, "/app/C:/x.txt"))
+
+    def test_a_real_file_whose_name_holds_a_backslash_names_nothing(self):
+        if os.name == "nt":
+            self.skipTest("Windows makes no file whose name holds a backslash")
+        (self.root / "app" / "a\\b.txt").write_text("x")
+        self.assertIsNone(start_wallet.resolve(self.root, "/app/a%5Cb.txt"))
+
+    def test_a_link_to_a_file_of_the_folder_outside_the_entry_is_not_followed(self):
+        self.link("readme-link.txt", self.root / "README.txt")
+        self.link("script-link.py", self.root / "start-wallet.py")
+        for target in ("/app/readme-link.txt", "/app/script-link.py"):
+            with self.subTest(target=target):
+                self.assertIsNone(start_wallet.resolve(self.root, target))
+
+    def test_a_link_to_the_folder_itself_is_not_followed(self):
+        self.link("back", self.root, directory=True)
+        self.assertIsNone(start_wallet.resolve(self.root, "/app/back/README.txt"))
+
+    def test_a_link_loop_names_nothing(self):
+        self.link("loop", self.root / "app" / "loop")
+        self.assertIsNone(start_wallet.resolve(self.root, "/app/loop"))
+
+    def test_a_target_the_url_parser_refuses_names_nothing(self):
+        self.assertIsNone(start_wallet.resolve(self.root, "//["))
+
 
 class ServerTest(unittest.TestCase):
     def setUp(self):
