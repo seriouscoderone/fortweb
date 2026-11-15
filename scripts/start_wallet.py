@@ -38,19 +38,24 @@ TYPES = {
 
 
 def resolve(root: Path, target: str) -> Path | None:
-    """The file a request target names, or None when it names nothing this script serves."""
-    parts = PurePosixPath(unquote(urlsplit(target).path)).parts
-    if len(parts) < 2 or parts[0] != "/" or parts[1] not in SERVED:
-        return None
-    if any(part in (".", "..") or "\\" in part or "\x00" in part for part in parts[1:]):
-        return None
+    """The file a request target names, or None when it names nothing this script serves. It never raises."""
     try:
+        parts = PurePosixPath(unquote(urlsplit(target).path)).parts
+        if len(parts) < 2 or parts[0] != "/" or parts[1] not in SERVED:
+            return None
+        # ":" too: under Windows path rules "C:.." is ".." on that drive and "C:name" is "name" at the folder's top.
+        if any(part in (".", "..") or "\\" in part or "\x00" in part or ":" in part for part in parts[1:]):
+            return None
         found = root.joinpath(*parts[1:]).resolve(strict=True)
-    except OSError:
+        if not found.is_file() or root not in found.parents:
+            return None
+        # After links are followed the file must still lie in the entry the target named. File systems on
+        # Windows and macOS ignore case, so the names are compared without it.
+        if found.relative_to(root).parts[0].lower() != parts[1].lower():
+            return None
+        return found
+    except (OSError, ValueError, RuntimeError):  # a link loop is RuntimeError before Python 3.13
         return None
-    if not found.is_file() or root not in found.parents:
-        return None
-    return found
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
