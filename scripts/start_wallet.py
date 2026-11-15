@@ -125,6 +125,9 @@ class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
     # On Windows, address reuse would let a second program listen on the same port.
     allow_reuse_address = sys.platform != "win32"
+    # Port sharing would let a second program listen beside this one and take some of the wallet's requests.
+    # Python 3.11 and later read this (off by default); before, it was never on.
+    allow_reuse_port = False
 
     def __init__(self, root: Path, port: int):
         self.wallet_root = root.resolve()

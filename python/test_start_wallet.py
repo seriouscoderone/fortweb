@@ -178,6 +178,11 @@ class ServerTest(unittest.TestCase):
     def test_it_listens_on_this_computer_only(self):
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
+    def test_no_second_server_shares_the_port(self):
+        with self.assertRaises(OSError):
+            second = start_wallet.Server(self.root, self.port)
+            second.server_close()
+
 
 class NameLookupTest(unittest.TestCase):
     def test_making_the_server_looks_no_name_up(self):
