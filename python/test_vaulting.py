@@ -489,8 +489,8 @@ class DefaultVaultTest(unittest.TestCase):
         return {vault["id"]: vault["isDefault"] for vault in self.call("vaults.list")["vaults"]}
 
     def put_legacy_record(self, vault_id, created_at):
-        # A record written before isDefault existed. The merged engine refuses a record without its root salt and
-        # storage name (pr42), so the record carries both.
+        # A record written before isDefault existed. A record without its root salt and storage name is refused, so
+        # the record carries both.
         record = {"id": vault_id, "alias": vault_id, "createdAt": created_at, "encrypted": True,
                   "rootSalt": "0AAwMTIzNDU2Nzg5YWJjZGVm", "storageName": f"fortweb-vault-{vault_id}"}
         self.registry["store"].items[vault_id.encode()] = json.dumps(record).encode()

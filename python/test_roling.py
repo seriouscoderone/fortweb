@@ -84,7 +84,7 @@ def _load_roling():
 
 
 class FakeLocks:
-    """navigator.locks as the worker's _acquire_writer uses it (merge spike): an exclusive, ifAvailable request
+    """navigator.locks as the worker's _acquire_writer uses it: an exclusive, ifAvailable request
     calls the callback with a lock, or with None when the name is held, and holds the name until what the callback
     returned (a proxy for a future) is done. The request's own future settles then."""
 
