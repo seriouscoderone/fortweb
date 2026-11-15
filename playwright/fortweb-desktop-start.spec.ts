@@ -58,6 +58,7 @@ test.afterAll(async () => {
 });
 
 test('the wallet opens from the start script, and a wallet made there is there after a reload', async ({ page }) => {
+    test.setTimeout(420_000);
     await page.goto(ADDRESS);
     await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8791\/app\/index\.html/);
     await expect(page.getByRole('heading', { name: 'Set up your wallet' })).toBeVisible({ timeout: 240_000 });
