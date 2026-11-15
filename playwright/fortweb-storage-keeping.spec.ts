@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { setUpWallet } from './fixtures/roles';
+import { setUpWallet, unlock } from './fixtures/roles';
 
 interface Asked { asked: number; kept: boolean }
 
@@ -79,10 +79,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await setUpWallet(page);
         await expect.poll(async () => (await asked(page)).asked).toBe(1);
         await page.getByRole('button', { name: 'Lock vault' }).click();
-        await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 60_000 });
-        await page.getByLabel('Passcode', { exact: true }).fill('roles-pass-1');
-        await page.getByRole('button', { name: 'Open', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible({ timeout: 60_000 });
+        await unlock(page);
         await expect.poll(async () => (await asked(page)).asked).toBe(2);
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('Yes');
