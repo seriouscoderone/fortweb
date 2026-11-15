@@ -3,6 +3,7 @@ import { announce } from "../../ui/core/a11y.js";
 import { createModal } from "../../ui/composites/modal.js";
 import { showToast } from "../../ui/composites/toast.js";
 import { fieldTextHtml } from "../../ui/primitives/field-text.js";
+import type { StorageKept } from "../../runtime/storage-keeping.js";
 
 interface VaultRecord {
     id: string;
@@ -23,7 +24,7 @@ interface SettingsPageProps {
     vault: VaultRecord;
     settings: SettingsRecord;
     /** What the browser says about keeping this wallet's storage. Absent inside the phone app and in fixtures. */
-    storageKept?: "kept" | "not-kept" | "unknown";
+    storageKept?: StorageKept;
     onDeleteVault?(vaultId: string): Promise<void>;
     /** Makes this the vault that opens when the app starts. */
     onMakeDefault?(vaultId: string): Promise<void>;
@@ -33,14 +34,20 @@ function enabledLabel(value: boolean): string {
     return value ? "Enabled" : "Disabled";
 }
 
-function keptLabel(value: NonNullable<SettingsPageProps["storageKept"]>): string {
-    if (value === "kept") {
-        return "Yes";
+function keptLabel(value: StorageKept): string {
+    switch (value) {
+        case "kept":
+            return "Yes";
+        case "not-kept":
+            return "No. The browser may remove this wallet's storage when it runs short of space.";
+        case "unknown":
+            return "This browser does not say.";
+        default: {
+            // A state added to StorageKept without a sentence here does not compile.
+            const unnamed: never = value;
+            return unnamed;
+        }
     }
-    if (value === "not-kept") {
-        return "No. The browser may remove this wallet's storage when it runs short of space.";
-    }
-    return "This browser does not say.";
 }
 
 function detailItem(label: string, value: string): HTMLDivElement {
