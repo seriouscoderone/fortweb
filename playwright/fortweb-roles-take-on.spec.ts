@@ -203,7 +203,10 @@ test.describe('Taking on a role', () => {
             const roles = rolesPage(page);
             await expect(roles.address).toHaveValue('');
             await expect(roles.cards).toHaveCount(0);
-            // A fresh runtime, as after the discard, refuses to take on a role from a read it has not made.
+            // A fresh runtime, as after the discard, refuses to take on a role from a read it has not made. Only one
+            // runtime at a time may hold the wallet's storage, so the page's own gives the vault up first.
+            await page.getByRole('button', { name: 'Lock vault' }).click();
+            await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 240_000 });
             await startRequest(page, 'vaults.open', { vaultId: 'my-wallet', passcode: 'roles-pass-1' });
             expect((await finishRequest(page)).ok).toBe(true);
             await startRequest(page, 'roles.takeOn', {
