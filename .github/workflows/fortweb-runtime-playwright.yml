@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - dev
+      - credentials
   workflow_dispatch:
     inputs:
       runtime_source_url:
