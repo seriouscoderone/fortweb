@@ -138,6 +138,8 @@ test.describe('Keeping the wallet\'s storage', () => {
     });
 
     test('Settings says the browser does not say when its read fails', async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
         await browserThatSays(page, true);
         await browserThatWillNotSay(page);
         await setUpWallet(page);
@@ -145,6 +147,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
         expect((await asked(page)).asked).toBe(1);
+        expect(pageErrors).toEqual([]);
     });
 
     test('Settings is drawn, saying the browser does not say, when the browser never answers the read', async ({ page }) => {
@@ -157,6 +160,8 @@ test.describe('Keeping the wallet\'s storage', () => {
     });
 
     test('Settings says the browser does not say when looking up its storage throws', async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
         await browserThatSays(page, true);
         await browserWhoseStorageLookUpCanThrow(page);
         await setUpWallet(page);
@@ -165,6 +170,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
         expect((await asked(page)).asked).toBe(1);
+        expect(pageErrors).toEqual([]);
     });
 
     test('a failed ask leaves the vault to open, with no error on the page', async ({ page }) => {
