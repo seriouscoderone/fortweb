@@ -83,18 +83,45 @@ def _load_roling():
         return _load("fortweb_roling_test", RUNTIME / "roling.py"), sourcing
 
 
+class FakeLocks:
+    """navigator.locks as the worker's _acquire_writer uses it (merge spike): an exclusive, ifAvailable request
+    calls the callback with a lock, or with None when the name is held, and holds the name until what the callback
+    returned (a proxy for a future) is done."""
+
+    def __init__(self):
+        self.held = set()
+
+    def request(self, name, options, callback):
+        async def run():
+            if name in self.held:
+                callback(None)
+                return None
+            self.held.add(name)
+            try:
+                waiter = callback(object())
+                if waiter is not None:
+                    await waiter.function
+            finally:
+                self.held.discard(name)
+        return run()
+
+
 def _load_worker(roling, posted: list, vaulting=None):
     """wallet-worker.py, loaded as the worker loads it, around this `roling`. What it posts to the page is appended
     to `posted`. Its other modules are stand-ins that take their settings and do nothing (`vaulting` may be given)."""
     stand_in = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
                                      BrowserClienter=object)
     modules = {
-        "js": types.SimpleNamespace(self=types.SimpleNamespace(postMessage=posted.append)),
+        "js": types.SimpleNamespace(self=types.SimpleNamespace(postMessage=posted.append),
+                                    navigator=types.SimpleNamespace(locks=FakeLocks()),
+                                    Object=types.SimpleNamespace(new=types.SimpleNamespace)),
         "polyscript": types.SimpleNamespace(config=types.SimpleNamespace(to_py=dict)),
         "onboarding": stand_in, "transporting": stand_in, "vaulting": vaulting or stand_in,
         "runtime_packages": types.SimpleNamespace(),
         "roling": roling,
     }
+    for key, value in _pyodide_stand_ins().items():  # the worker imports create_proxy when it takes the writer lock
+        sys.modules.setdefault(key, value)
     with _stand_ins(modules), warnings.catch_warnings():  # the worker sets warning filters of its own
         return _load("fortweb_wallet_worker_test", RUNTIME / "wallet-worker.py")
 
@@ -276,6 +303,10 @@ class FakeHab:
         self.name, self.pre = name, pre
 
 
+async def _flush_nothing():
+    pass
+
+
 class FakeHby:
     """A Habery stand-in. persist_and_reload closes it and gives a new one over the same data, as the real one does."""
 
@@ -283,7 +314,8 @@ class FakeHby:
         self.closed = False
         self.make_fails = False
         self._habs = habs
-        self.db = types.SimpleNamespace(db=db, closed=False)
+        self.db = types.SimpleNamespace(db=db, closed=False, flush=_flush_nothing)
+        self.ks = types.SimpleNamespace(flush=_flush_nothing)
 
     def _check(self):
         if self.closed:
@@ -1495,7 +1527,8 @@ class Vaults:
         salt = "0AAwMTIzNDU2Nzg5YWJjZGVm"
         store = types.SimpleNamespace(items={
             vault_id.encode(): json.dumps({"id": vault_id, "alias": alias, "encrypted": bool(passcodes[vault_id]),
-                                           "createdAt": "2026-11-12T09:00:00+00:00", "rootSalt": salt}).encode()
+                                           "createdAt": "2026-11-12T09:00:00+00:00", "rootSalt": salt,
+                                           "storageName": f"fortweb-vault-{vault_id}"}).encode()  # WALLET_STORAGE_PREFIX
             for vault_id, alias in ((VAULT, "My Wallet"), (SIDE, "Side"))})
         registry = {"db": RegistryDb(), "store": store}
         modules = {

@@ -261,7 +261,7 @@ test.describe('Taking on a role', () => {
         await page.reload();
         await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 240_000 });
         const removed = await page.evaluate(async () => {
-            const names = ['frol.', 'fdef.'].map((store) => `IDBMap/@fortweb/fortweb-vault-my-wallet:${store}`);
+            const names = ['frol.', 'fdef.'].map((store) => `IDBMap/@fortweb-v2/fortweb-vault-my-wallet:${store}`);
             const present = (await indexedDB.databases()).map((database) => database.name);
             const missing = names.filter((name) => !present.includes(name));
             if (missing.length > 0) throw new Error(`not there to remove: ${missing.join(', ')}`);
@@ -300,7 +300,7 @@ test.describe('Taking on a role', () => {
                 request.onsuccess = () => resolve(request.result);
                 request.onerror = () => reject(request.error);
             });
-            const database = await done(indexedDB.open('IDBMap/@fortweb/fortweb-vault-my-wallet:frol.'));
+            const database = await done(indexedDB.open('IDBMap/@fortweb-v2/fortweb-vault-my-wallet:frol.'));
             const [storeName] = Array.from(database.objectStoreNames);
             const store = () => database.transaction(storeName, 'readwrite').objectStore(storeName);
             const records = await done(store().get('__records__'));
