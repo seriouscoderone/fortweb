@@ -135,9 +135,11 @@ class FakeLocks:
         return released
 
 
-def _load_worker(roling, posted: list, vaulting=None):
+def _load_worker(test: unittest.TestCase, roling, posted: list, vaulting=None):
     """wallet-worker.py, loaded as the worker loads it, around this `roling`. What it posts to the page is appended
-    to `posted`. Its other modules are stand-ins that take their settings and do nothing (`vaulting` may be given)."""
+    to `posted`. Its other modules are stand-ins that take their settings and do nothing (`vaulting` may be given).
+    The worker imports pyodide.ffi when it takes the writer lock: its stand-ins stay in sys.modules until `test`
+    ends, and what was there is put back then."""
     stand_in = types.SimpleNamespace(configure_runtime=lambda **settings: None, RuntimeFault=RuntimeFault,
                                      BrowserClienter=object)
     modules = {
@@ -149,8 +151,7 @@ def _load_worker(roling, posted: list, vaulting=None):
         "runtime_packages": types.SimpleNamespace(),
         "roling": roling,
     }
-    for key, value in _pyodide_stand_ins().items():  # the worker imports create_proxy when it takes the writer lock
-        sys.modules.setdefault(key, value)
+    test.enterContext(_stand_ins(_pyodide_stand_ins()))
     with _stand_ins(modules), warnings.catch_warnings():  # the worker sets warning filters of its own
         return _load("fortweb_wallet_worker_test", RUNTIME / "wallet-worker.py")
 
@@ -1502,7 +1503,7 @@ class WorkerDiagnosticTest(unittest.IsolatedAsyncioTestCase):
     async def test_worker_gives_roling_its_emitter_so_the_report_reaches_the_page(self):
         roling, sourcing = _load_roling()
         posted = []
-        _load_worker(roling, posted)
+        _load_worker(self, roling, posted)
 
         async def answer(url, options):
             return types.SimpleNamespace(status=200, headers=None, body=None)  # .get on None: AttributeError
@@ -1606,8 +1607,8 @@ class WorkerRequests:
     """The worker's handle_request around a `roling` and a `vaulting` (the module of a Vaults), with its runtime
     ready."""
 
-    def __init__(self, roling, vaulting):
-        self.worker = _load_worker(roling, [], vaulting)
+    def __init__(self, test, roling, vaulting):
+        self.worker = _load_worker(test, roling, [], vaulting)
         ready = asyncio.get_running_loop().create_future()
         ready.set_result(True)
         self.worker._RUNTIME_READY_TASK = ready
@@ -1623,7 +1624,7 @@ class RequestLockTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_sources_read_runs_while_another_request_holds_the_lock(self):
         roling, _ = _load_roling()
-        worker = WorkerRequests(roling, Vaults().vaulting).worker
+        worker = WorkerRequests(self, roling, Vaults().vaulting).worker
         self.assertEqual(worker._UNLOCKED_METHODS, frozenset({"sources.read"}))
         reached = []
 
@@ -1665,7 +1666,7 @@ class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
         self.roling._fetch_bytes = fetch_bytes
         self.vaults = Vaults()
         self.roling.vaulting = self.vaults.vaulting
-        self.request = WorkerRequests(self.roling, self.vaults.vaulting)
+        self.request = WorkerRequests(self, self.roling, self.vaults.vaulting)
         await self.open(VAULT)
 
     async def open(self, vault, passcode=""):
