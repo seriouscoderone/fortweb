@@ -67,6 +67,21 @@ class RuntimeRuntimeVerifierTest(unittest.TestCase):
                 RUNTIME,
             )
 
+    def test_rejects_the_credential_switch_turned_off(self):
+        raw = (RUNTIME / "pyscript-ci.toml").read_text()
+        changed = raw.replace("fort_synthetic_recipient_testing = true", "fort_synthetic_recipient_testing = false")
+        self.assertNotEqual(changed, raw)
+        with self.assertRaisesRegex(RuntimeError, "credential test switch is not exact"):
+            verifier.validate_runtime_config(changed.encode(), RUNTIME)
+
+    def test_rejects_a_config_without_the_credential_switch(self):
+        raw = (RUNTIME / "pyscript-ci.toml").read_text()
+        changed = "\n".join(line for line in raw.splitlines()
+                            if not line.startswith("fort_synthetic_recipient_testing")) + "\n"
+        self.assertNotEqual(changed, raw)
+        with self.assertRaisesRegex(RuntimeError, "unexpected top-level keys"):
+            verifier.validate_runtime_config(changed.encode(), RUNTIME)
+
     def test_rejects_changed_worker_file_map(self):
         raw = (RUNTIME / "pyscript-ci.toml").read_text()
         changed = raw.replace(

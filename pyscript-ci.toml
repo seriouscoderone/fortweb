@@ -1,4 +1,7 @@
 interpreter = "./vendor/pyodide/314.0.5/pyodide.mjs"
+# This fork turns on the Foundation's test-only switch for received credentials (decision D3 of Fortoid's design,
+# .internal/specs/2026-11-14-standard-credential-screens-design.md).
+fort_synthetic_recipient_testing = true
 
 [fort_runtime_packages]
 manifest = "./runtime-closure.json"

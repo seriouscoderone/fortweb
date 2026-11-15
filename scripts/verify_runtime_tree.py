@@ -94,8 +94,12 @@ def safe_config_reference(value: object, label: str) -> str:
 
 def validate_runtime_config(raw: bytes, root: Path) -> dict:
     config = tomllib.loads(raw.decode())
-    if set(config) != {"interpreter", "fort_runtime_packages", "files"}:
+    if set(config) != {"interpreter", "fort_runtime_packages", "files", "fort_synthetic_recipient_testing"}:
         raise RuntimeError("packaged PyScript config has unexpected top-level keys")
+    # This fork turns on the Foundation's test-only switch for received credentials. The value is exact: anything
+    # but true would turn receiving a credential off without a word.
+    if config["fort_synthetic_recipient_testing"] is not True:
+        raise RuntimeError("packaged credential test switch is not exact")
     if config["interpreter"] != "./vendor/pyodide/314.0.5/pyodide.mjs":
         raise RuntimeError("packaged PyScript interpreter is not exact")
     package_config = config["fort_runtime_packages"]
