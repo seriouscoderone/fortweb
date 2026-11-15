@@ -17,20 +17,27 @@ test.beforeAll(async () => {
     const started = spawn('python3', COMMAND, { stdio: ['ignore', 'pipe', 'pipe'] });
     script = started;
     await new Promise<void>((resolve, reject) => {
+        // Only this line on standard output means the script serves. Its refusals name the address too, on
+        // standard error, and what they say is kept for the failure message.
         let said = '';
-        const timer = setTimeout(() => reject(new Error(`the start script said nothing in 15 s: ${said}`)), 15_000);
-        const hear = (chunk: Buffer): void => {
+        let warned = '';
+        const timer = setTimeout(
+            () => reject(new Error(`the start script did not start in 15 s: ${said}${warned}`)),
+            15_000,
+        );
+        started.stdout?.on('data', (chunk: Buffer) => {
             said += chunk.toString();
-            if (said.includes(ADDRESS)) {
+            if (said.includes(`The wallet is at ${ADDRESS}`)) {
                 clearTimeout(timer);
                 resolve();
             }
-        };
-        started.stdout?.on('data', hear);
-        started.stderr?.on('data', hear);
-        started.once('exit', (code) => {
+        });
+        started.stderr?.on('data', (chunk: Buffer) => {
+            warned += chunk.toString();
+        });
+        started.once('close', (code) => {
             clearTimeout(timer);
-            reject(new Error(`the start script stopped with code ${code}: ${said}`));
+            reject(new Error(`the start script stopped with code ${code}: ${said}${warned}`));
         });
     });
 });
