@@ -2,6 +2,7 @@
 import contextlib
 import errno
 import http.client
+import http.server
 import io
 import importlib.util
 import os
@@ -246,6 +247,37 @@ class ServerTest(unittest.TestCase):
         with mock.patch.object(start_wallet, "resolve", side_effect=ZeroDivisionError("a real fault")):
             report = self.reported(lambda: self.assertRaises(http.client.RemoteDisconnected, self.get, "/app/main.js"))
         self.assertIn("ZeroDivisionError: a real fault", report)
+
+    def unjoined(self):
+        """Has the handler see the target as sent, as Python's library handed it over before it joined a leading
+        "//" into "/" (the security releases of 2022: 3.9.14 and its siblings; macOS ships 3.9.6)."""
+        def parse_request(handler):
+            parsed = http.server.BaseHTTPRequestHandler.parse_request(handler)
+            if parsed:
+                handler.path = handler.requestline.split()[1]
+            return parsed
+
+        return mock.patch.object(start_wallet.Handler, "parse_request", parse_request)
+
+    def answer(self, target, host=None):
+        try:
+            response, _ = self.get(target, host=host)
+        except http.client.RemoteDisconnected:
+            return "no answer"
+        return response.status, response.getheader("Location")
+
+    def test_a_target_the_url_parser_refuses_is_a_bad_request(self):
+        answers = []
+        with self.unjoined():
+            report = self.reported(lambda: answers.append(self.answer("//[")))
+        self.assertEqual((answers, report), ([(400, None)], ""))
+
+    def test_a_target_with_a_leading_double_slash_is_served_nothing(self):
+        with self.unjoined():
+            self.assertEqual(self.answer("//app/index.html"), (404, None))
+            status, location = self.answer("//app/index.html", host=f"localhost:{self.port}")
+        self.assertEqual(status, 307)
+        self.assertTrue(location.startswith(f"http://127.0.0.1:{self.port}/"), location)
 
     def test_other_methods_are_refused(self):
         response, _ = self.get("/app/index.html", method="POST")

@@ -79,14 +79,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         port = self.server.server_address[1]
         own = f"{HOST}:{port}"
         host = self.headers.get("Host", "")
-        if not self.path.startswith("/"):
+        try:
+            path = urlsplit(self.path).path
+        except ValueError:  # "//[", which Python's library before 2022 (3.9.6 on macOS) hands over as it came
+            path = None
+        if not self.path.startswith("/") or path is None:
             self._refuse(400, "Bad request.", with_body)
         elif host == f"localhost:{port}":
             # One address, one wallet: localhost would be a second, empty one.
             self._send_on(f"http://{own}{self.path}")
         elif host != own:
             self._refuse(421, f"This wallet answers only at http://{own}/.", with_body)
-        elif urlsplit(self.path).path == "/":
+        elif path == "/":
             self._send_on(f"http://{own}/{START_PAGE}")
         else:
             found = resolve(self.server.wallet_root, self.path)
