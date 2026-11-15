@@ -86,24 +86,53 @@ def _load_roling():
 class FakeLocks:
     """navigator.locks as the worker's _acquire_writer uses it (merge spike): an exclusive, ifAvailable request
     calls the callback with a lock, or with None when the name is held, and holds the name until what the callback
-    returned (a proxy for a future) is done."""
+    returned (a proxy for a future) is done. The request's own future settles then."""
 
     def __init__(self):
         self.held = set()
 
     def request(self, name, options, callback):
-        async def run():
+        # As the browser's request does, this returns a promise (here a future) that settles when the lock is let go,
+        # and calls the callback later. No task waits while the lock is held: a worker that is dropped while it holds
+        # the lock leaves nothing pending behind it.
+        loop = asyncio.get_running_loop()
+        released = loop.create_future()
+
+        def settle(outcome):
+            self.held.discard(name)
+            if released.done():
+                return
+            if outcome.cancelled():
+                released.cancel()
+            elif outcome.exception() is not None:
+                released.set_exception(outcome.exception())
+            else:
+                released.set_result(None)
+
+        def grant():
             if name in self.held:
-                callback(None)
-                return None
+                try:
+                    callback(None)
+                except BaseException as error:
+                    released.set_exception(error)
+                else:
+                    released.set_result(None)
+                return
             self.held.add(name)
             try:
                 waiter = callback(object())
-                if waiter is not None:
-                    await waiter.function
-            finally:
+            except BaseException as error:
                 self.held.discard(name)
-        return run()
+                released.set_exception(error)
+                return
+            if waiter is None:
+                self.held.discard(name)
+                released.set_result(None)
+            else:
+                waiter.function.add_done_callback(settle)
+
+        loop.call_soon(grant)
+        return released
 
 
 def _load_worker(roling, posted: list, vaulting=None):
