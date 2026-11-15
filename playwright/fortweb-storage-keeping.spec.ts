@@ -157,11 +157,14 @@ test.describe('Keeping the wallet\'s storage', () => {
     });
 
     test('Settings says the browser does not say when looking up its storage throws', async ({ page }) => {
+        await browserThatSays(page, true);
         await browserWhoseStorageLookUpCanThrow(page);
         await setUpWallet(page);
+        await expect.poll(async () => (await asked(page)).asked).toBe(1);
         await throwOnLookUp(page);
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
+        expect((await asked(page)).asked).toBe(1);
     });
 
     test('a failed ask leaves the vault to open, with no error on the page', async ({ page }) => {
