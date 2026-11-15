@@ -11,6 +11,7 @@ answers only requests made to its own address.
 from __future__ import annotations
 
 import argparse
+import errno
 import http.server
 import mimetypes
 import sys
@@ -147,7 +148,13 @@ def main(argv: list[str] | None = None) -> int:
     address = f"http://{HOST}:{PORT}/"
     try:
         server = Server(root, PORT)
-    except OSError:
+    except OSError as error:
+        if error.errno not in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE)):
+            # Not another program: a port the system keeps for itself, for one. Closing a program would not help.
+            print(f"This computer did not let the script listen on port {PORT}: {error.strerror or error}.\n"
+                  "The wallet keeps its storage under one address, so this script does not pick another port.",
+                  file=sys.stderr)
+            return 1
         print(f"Port {PORT} on this computer is in use, perhaps by another copy of this wallet.\n"
               "The wallet keeps its storage under one address, so this script does not pick another port.\n"
               "Close the other program and start again. Until this script says the wallet is running,\n"

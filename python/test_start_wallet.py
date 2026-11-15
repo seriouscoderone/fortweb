@@ -1,5 +1,6 @@
 """The script that serves the wallet to a browser on a computer (scripts/start_wallet.py)."""
 import contextlib
+import errno
 import http.client
 import io
 import importlib.util
@@ -215,6 +216,18 @@ class MainTest(unittest.TestCase):
         self.assertIn("does not pick another port", err)
         self.assertIn(f"do not open http://127.0.0.1:{start_wallet.PORT}/: whatever holds the port would be "
                       "answering there.", err)
+
+    def test_a_port_the_system_will_not_give_says_so(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = package(Path(folder).resolve() / "wallet")
+            with mock.patch.object(start_wallet, "Server",
+                                   side_effect=PermissionError(errno.EACCES, "Permission denied")):
+                code, out, err = self.run_main("--root", str(root), "--no-browser")
+        self.assertEqual((code, out), (1, ""))
+        self.assertEqual(err, f"This computer did not let the script listen on port {start_wallet.PORT}: "
+                              "Permission denied.\n"
+                              "The wallet keeps its storage under one address, so this script does not pick "
+                              "another port.\n")
 
 if __name__ == "__main__":
     unittest.main()
