@@ -6,21 +6,34 @@ interface Asked { asked: number; kept: boolean }
 
 /**
  * The browser's answers are made the test's own: it counts how often it is asked and gives `answers` in turn, the
- * last one again from then on.
+ * last one again from then on. An answer of 'rejects' makes the ask fail instead.
  */
-async function browserThatSays(page: Page, ...answers: boolean[]): Promise<void> {
+async function browserThatSays(page: Page, ...answers: Array<boolean | 'rejects'>): Promise<void> {
     await page.addInitScript((given) => {
         const state = { asked: 0, kept: false };
         (window as unknown as { storageAsked: typeof state }).storageAsked = state;
         StorageManager.prototype.persist = async function persist(): Promise<boolean> {
-            state.kept = given[Math.min(state.asked, given.length - 1)] === true;
+            const answer = given[Math.min(state.asked, given.length - 1)];
             state.asked += 1;
+            if (answer === 'rejects') {
+                throw new TypeError('The browser would not answer.');
+            }
+            state.kept = answer === true;
             return state.kept;
         };
         StorageManager.prototype.persisted = async function persisted(): Promise<boolean> {
             return state.kept;
         };
     }, answers);
+}
+
+/** The browser fails every read of whether it keeps the storage, whatever it was asked before. */
+async function browserThatWillNotSay(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+        StorageManager.prototype.persisted = async function persisted(): Promise<boolean> {
+            throw new TypeError('The browser would not say.');
+        };
+    });
 }
 
 /** Stands in for the phone app: its bridge is there, and offers nothing. */
@@ -91,6 +104,27 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('Yes');
         expect((await asked(page)).asked).toBe(2);
+    });
+
+    test('Settings says the browser does not say when its read fails', async ({ page }) => {
+        await browserThatSays(page, true);
+        await browserThatWillNotSay(page);
+        await setUpWallet(page);
+        await expect.poll(async () => (await asked(page)).asked).toBe(1);
+        await openSettings(page);
+        await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
+        expect((await asked(page)).asked).toBe(1);
+    });
+
+    test('a failed ask leaves the vault to open, with no error on the page', async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => pageErrors.push(error.message));
+        await browserThatSays(page, 'rejects');
+        await setUpWallet(page);
+        await expect.poll(async () => (await asked(page)).asked).toBe(1);
+        await expect(page.getByRole('heading', { name: 'Roles', exact: true, level: 1 })).toBeVisible();
+        await expect(page.locator('.ui-toast--error, .status-line--error, [role="alert"]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
     });
 
     test('inside the phone app the wallet still asks, and Settings has no line about a browser', async ({ page }) => {
