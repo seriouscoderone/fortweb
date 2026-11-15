@@ -229,5 +229,38 @@ class MainTest(unittest.TestCase):
                               "The wallet keeps its storage under one address, so this script does not pick "
                               "another port.\n")
 
+    def free_port(self):
+        finder = socket.socket()
+        finder.bind(("127.0.0.1", 0))
+        port = finder.getsockname()[1]
+        finder.close()
+        return port
+
+    def run_until_stopped(self, *argv):
+        """main run on a free port until Ctrl+C, with the browser opener replaced: what it gives and does."""
+        port = self.free_port()
+        self.use_port(port)
+        with tempfile.TemporaryDirectory() as folder:
+            root = package(Path(folder).resolve() / "wallet")
+            with mock.patch.object(start_wallet.webbrowser, "open") as opened, \
+                    mock.patch.object(start_wallet.Server, "serve_forever", side_effect=KeyboardInterrupt):
+                code, out, err = self.run_main("--root", str(root), *argv)
+        return port, code, out, err, opened
+
+    def test_the_script_says_where_the_wallet_is_and_opens_the_browser_there(self):
+        port, code, out, err, opened = self.run_until_stopped()
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"The wallet is at http://127.0.0.1:{port}/\n", out)
+        opened.assert_called_once_with(f"http://127.0.0.1:{port}/")
+        again = socket.socket()
+        self.addCleanup(again.close)
+        again.bind(("127.0.0.1", port))  # the port is free again once the script has stopped
+
+    def test_no_browser_opens_none(self):
+        port, code, out, err, opened = self.run_until_stopped("--no-browser")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"The wallet is at http://127.0.0.1:{port}/\n", out)
+        opened.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
