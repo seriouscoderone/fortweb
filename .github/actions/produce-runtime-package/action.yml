@@ -154,7 +154,8 @@ runs:
           python/test_vaulting.py \
           python/test_sourcing.py \
           python/test_roling.py \
-          python/test_verify_runtime_tree.py
+          python/test_verify_runtime_tree.py \
+          python/test_start_wallet.py
 
     - name: Check runtime JS
       shell: bash
