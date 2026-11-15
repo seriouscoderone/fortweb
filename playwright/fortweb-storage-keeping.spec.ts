@@ -63,6 +63,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await expect.poll(async () => (await asked(page)).asked).toBe(1);
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('Yes');
+        expect((await asked(page)).asked).toBe(1);
     });
 
     test('Settings says so when the browser did not agree', async ({ page }) => {
@@ -72,6 +73,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(keptByTheBrowser(page))
             .toHaveText('No. The browser may remove this wallet\'s storage when it runs short of space.');
+        expect((await asked(page)).asked).toBe(1);
     });
 
     test('a browser that said no is asked again when the vault is next opened, and Settings follows its answer', async ({ page }) => {
@@ -83,6 +85,7 @@ test.describe('Keeping the wallet\'s storage', () => {
         await expect.poll(async () => (await asked(page)).asked).toBe(2);
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('Yes');
+        expect((await asked(page)).asked).toBe(2);
     });
 
     test('inside the phone app the wallet still asks, and Settings has no line about a browser', async ({ page }) => {
@@ -93,5 +96,6 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(page.getByText('Storage Backend', { exact: true })).toBeVisible();
         await expect(page.getByText('Kept by the Browser', { exact: true })).toHaveCount(0);
+        expect((await asked(page)).asked).toBe(1);
     });
 });
