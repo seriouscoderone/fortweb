@@ -312,6 +312,44 @@ class NameLookupTest(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual((response.status, response.read()), (200, b"export {};"))
 
+class RestartTest(unittest.TestCase):
+    def test_a_stopped_server_can_be_started_again_at_once_on_the_same_port(self):
+        # A person stops the script and starts it again: the closed connections the first one leaves behind
+        # must not keep the second from the port.
+        with tempfile.TemporaryDirectory() as folder:
+            root = package(Path(folder).resolve() / "wallet")
+            first = start_wallet.Server(root, 0)
+            port = first.server_address[1]
+            thread = threading.Thread(target=first.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for _ in range(5):
+                    with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
+                        connection.sendall(f"GET /app/main.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                        received = b""
+                        while True:  # to the end: the server has closed the connection
+                            chunk = connection.recv(65536)
+                            if not chunk:
+                                break
+                            received += chunk
+                        self.assertTrue(received.startswith(b"HTTP/1.0 200 "), received[:40])
+            finally:
+                first.shutdown()
+                first.server_close()
+                thread.join()
+            second = start_wallet.Server(root, port)
+            self.addCleanup(second.server_close)
+            thread = threading.Thread(target=second.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(thread.join)
+            self.addCleanup(second.shutdown)
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            self.addCleanup(connection.close)
+            connection.request("GET", "/app/main.js")
+            response = connection.getresponse()
+            self.assertEqual((response.status, response.read()), (200, b"export {};"))
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, *argv):
         """main's exit code, and what it wrote to standard output and standard error."""
