@@ -35,6 +35,10 @@ test.beforeAll(async () => {
         started.stderr?.on('data', (chunk: Buffer) => {
             warned += chunk.toString();
         });
+        started.once('error', (error) => {
+            clearTimeout(timer);
+            reject(new Error(`the start script could not be started (python3 ${COMMAND.join(' ')}): ${error.message}`));
+        });
         started.once('close', (code) => {
             clearTimeout(timer);
             reject(new Error(`the start script stopped with code ${code}: ${said}${warned}`));
@@ -42,8 +46,15 @@ test.beforeAll(async () => {
     });
 });
 
-test.afterAll(() => {
-    script?.kill();
+test.afterAll(async () => {
+    // Wait until the script has exited, so the port is free for whatever runs next.
+    const running = script;
+    if (running?.pid === undefined || running.exitCode !== null || running.signalCode !== null) {
+        return;
+    }
+    const exited = new Promise<void>((resolve) => running.once('exit', () => resolve()));
+    running.kill();
+    await exited;
 });
 
 test('the wallet opens from the start script, and a wallet made there is there after a reload', async ({ page }) => {
