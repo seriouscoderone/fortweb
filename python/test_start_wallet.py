@@ -47,7 +47,10 @@ class ResolveTest(unittest.TestCase):
         for target in ("/", "/README.txt", "/start-wallet.py", "/app", "/app/", "/app/missing.js", "/vendor",
                        "/../outside.txt", "/app/../../outside.txt", "/app/%2e%2e/%2e%2e/outside.txt",
                        "/app/..%2f..%2foutside.txt", "/app\\..\\..\\outside.txt", "/app/index.html%00.js",
-                       "app/index.html", "//app/index.html", "/APP/index.html" if os.name != "nt" else "/nothing"):
+                       "app/index.html", "/APP/index.html" if os.name != "nt" else "/nothing",
+                       # True of resolve() only: Python's server joins a leading "//" before the script sees it.
+                       "//app/index.html",
+                       "/app/index.html/", "/pyscript-ci.toml/", "/app/main.js/?x=1"):
             with self.subTest(target=target):
                 self.assertIsNone(start_wallet.resolve(self.root, target))
 
@@ -159,7 +162,8 @@ class ServerTest(unittest.TestCase):
                 self.assertNotIn(b"wallet</title>", body)
 
     def test_what_is_not_in_a_package_is_not_found(self):
-        for target in ("/README.txt", "/start-wallet.py", "/app/", "/app/../README.txt", "/nothing"):
+        for target in ("/README.txt", "/start-wallet.py", "/app/", "/app/../README.txt", "/nothing",
+                       "/app/index.html/", "/pyscript-ci.toml/"):
             with self.subTest(target=target):
                 self.assertEqual(self.get(target)[0].status, 404)
 

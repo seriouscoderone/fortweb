@@ -40,7 +40,10 @@ TYPES = {
 def resolve(root: Path, target: str) -> Path | None:
     """The file a request target names, or None when it names nothing this script serves. It never raises."""
     try:
-        parts = PurePosixPath(unquote(urlsplit(target).path)).parts
+        path = unquote(urlsplit(target).path)
+        if path.endswith("/"):  # a folder's name, never a file's
+            return None
+        parts = PurePosixPath(path).parts
         if len(parts) < 2 or parts[0] != "/" or parts[1] not in SERVED:
             return None
         # ":" too: under Windows path rules "C:.." is ".." on that drive and "C:name" is "name" at the folder's top.
