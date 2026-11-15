@@ -101,6 +101,15 @@ class ResolveTest(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertIsNone(start_wallet.resolve(self.root, target))
 
+    def test_a_link_to_a_folder_that_differs_from_the_entry_in_case_only_is_not_followed(self):
+        try:
+            (self.root / "APP").mkdir()
+        except FileExistsError:
+            self.skipTest("this file system ignores case: no folder APP can be made beside app")
+        (self.root / "APP" / "secret.txt").write_text("secret")
+        self.link("up", Path("..") / "APP" / "secret.txt")
+        self.assertIsNone(start_wallet.resolve(self.root, "/app/up"))
+
     def test_a_link_to_the_folder_itself_is_not_followed(self):
         self.link("back", self.root, directory=True)
         self.assertIsNone(start_wallet.resolve(self.root, "/app/back/README.txt"))

@@ -14,6 +14,7 @@ import argparse
 import errno
 import http.server
 import mimetypes
+import os
 import socketserver
 import sys
 import webbrowser
@@ -54,9 +55,10 @@ def resolve(root: Path, target: str) -> Path | None:
         found = root.joinpath(*parts[1:]).resolve(strict=True)
         if not found.is_file() or root not in found.parents:
             return None
-        # After links are followed the file must still lie in the entry the target named. File systems on
-        # Windows and macOS ignore case, so the names are compared without it.
-        if found.relative_to(root).parts[0].lower() != parts[1].lower():
+        # After links are followed the file must still lie in the entry the target named, compared as this system
+        # compares names: without case on Windows, exactly elsewhere, so a folder "APP" beside "app" is not "app".
+        # On macOS only a link can reach the entry under another spelling, and such a link is refused.
+        if os.path.normcase(found.relative_to(root).parts[0]) != os.path.normcase(parts[1]):
             return None
         return found
     except (OSError, ValueError, RuntimeError):  # a link loop is RuntimeError before Python 3.13
