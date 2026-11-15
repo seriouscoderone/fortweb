@@ -3,9 +3,11 @@
  *
  * A browser may remove a site's storage when space runs short unless the site has asked to keep it and the browser
  * has agreed. Chrome and Edge decide by themselves, without asking the person, and say no to a site they have just
- * met; they may say yes once it has been used. So the wallet asks each time a vault is opened, which includes the
- * moment it is made. In a regular browser, Settings shows the answer. Inside the phone app the wallet asks too and
- * shows nothing: what Android's WebView answers, and what it then does, is not yet known.
+ * met; they may say yes once it has been used. So the wallet asks each time a vault is opened. A wallet set up for
+ * the first time is opened at once, so it is asked then; a further vault made from the drawer is not opened until
+ * the person opens it, and that is when the browser is asked. In a regular browser, Settings shows the answer. Inside
+ * the phone app the wallet asks too and shows nothing: what Android's WebView answers, and what it then does, is not
+ * yet known.
  */
 export type StorageKept = "kept" | "not-kept" | "unknown";
 

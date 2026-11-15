@@ -378,7 +378,8 @@ actions = {
     async openVault(vaultId: string, passcode = ""): Promise<Record<string, unknown>> {
         const { vault } = await bridge.request<{ vault: Record<string, unknown> }>(METHODS.vaultsOpen, { vaultId, passcode });
         // A browser that has just met the wallet says no; it may say yes once the wallet has been used. So the
-        // wallet asks at every opening, and does not wait for the answer.
+        // wallet asks at every opening, and does not wait for the answer. A wallet set up for the first time is
+        // opened at once; a further vault made from the drawer is asked for when the person first opens it.
         void askToKeepStorage();
         session.patch({
             unlockedVaultId: vaultId,
