@@ -6,6 +6,7 @@ import socket
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "start_wallet.py"
@@ -180,18 +181,23 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(start_wallet.main(["--root", folder, "--no-browser"]), 2)
 
+    def use_port(self, port):
+        """Has the script use this port for the length of the test."""
+        patcher = mock.patch.object(start_wallet, "PORT", port)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_a_taken_port_stops_the_script(self):
+        holder = socket.socket()
+        self.addCleanup(holder.close)
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        self.use_port(holder.getsockname()[1])
         with tempfile.TemporaryDirectory() as folder:
             root = package(Path(folder).resolve() / "wallet")
-            holder = socket.socket()
-            self.addCleanup(holder.close)
-            try:
-                holder.bind(("127.0.0.1", start_wallet.PORT))
-            except OSError:
-                self.skipTest(f"port {start_wallet.PORT} is already in use on this machine")
-            holder.listen(1)
-            self.assertEqual(start_wallet.main(["--root", str(root), "--no-browser"]), 1)
-
+            with mock.patch.object(start_wallet.Server, "serve_forever",
+                                   side_effect=AssertionError("the script served on a taken port")):
+                self.assertEqual(start_wallet.main(["--root", str(root), "--no-browser"]), 1)
 
 if __name__ == "__main__":
     unittest.main()
