@@ -111,7 +111,8 @@ _MODULES = None
 _REQUEST_LOCK = asyncio.Lock()
 # Methods that touch no vault and run without the request lock. A source read may take a minute; holding the lock
 # that long would make any other request time out, and a timed-out request restarts the worker (closing the vault).
-# Reads run side by side; roling keeps only the newest one's result.
+# Reads run side by side; roling keeps only the newest one's result. They also run without the writer lock and
+# without the flush that ends every other request, so a method added here must reach no storage.
 _UNLOCKED_METHODS = frozenset({"sources.read"})
 _RUNTIME_READY_TASK = None
 _WRITER_LOCK = None
