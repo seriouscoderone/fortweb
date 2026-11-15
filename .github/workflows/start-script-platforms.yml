@@ -1,0 +1,37 @@
+name: Start Script on Windows, macOS and Linux
+
+# The start script (scripts/start_wallet.py) runs on a person's own computer, with nothing installed but
+# Python 3: its unit tests run on each of the three systems, from the oldest Python it supports (3.9, which
+# macOS ships) to the newest.
+on:
+  push:
+    branches:
+      - credentials
+    paths:
+      - scripts/start_wallet.py
+      - python/test_start_wallet.py
+      - .github/workflows/start-script-platforms.yml
+
+permissions:
+  contents: read
+
+jobs:
+  start-script:
+    name: Start script (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.9', '3.11', '3.13']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Run the start script's unit tests
+        run: python -m unittest -v python/test_start_wallet.py
