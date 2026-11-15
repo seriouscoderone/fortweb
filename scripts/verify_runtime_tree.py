@@ -96,8 +96,10 @@ def validate_runtime_config(raw: bytes, root: Path) -> dict:
     config = tomllib.loads(raw.decode())
     if set(config) != {"interpreter", "fort_runtime_packages", "files", "fort_synthetic_recipient_testing"}:
         raise RuntimeError("packaged PyScript config has unexpected top-level keys")
-    # This fork turns on the Foundation's test-only switch for received credentials. The value is exact: anything
-    # but true would turn receiving a credential off without a word.
+    # This fork turns on the Foundation's test-only credential switch. It opens receiving a credential
+    # (credentials.receive, credentials.getReceived) and every ipex method (grant, receive, admit, present,
+    # verifyPresentation, get); each call must still pass syntheticOnly: true. The value is exact: anything
+    # but true would turn all of them off without a word.
     if config["fort_synthetic_recipient_testing"] is not True:
         raise RuntimeError("packaged credential test switch is not exact")
     if config["interpreter"] != "./vendor/pyodide/314.0.5/pyodide.mjs":
