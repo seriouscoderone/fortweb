@@ -82,6 +82,26 @@ class RuntimeRuntimeVerifierTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unexpected top-level keys"):
             verifier.validate_runtime_config(changed.encode(), RUNTIME)
 
+    def test_rejects_a_credential_switch_that_is_not_exactly_true(self):
+        raw = (RUNTIME / "pyscript-ci.toml").read_text()
+        for value in ('"true"', "1", "1.0", "[true]"):
+            with self.subTest(value=value):
+                changed = raw.replace("fort_synthetic_recipient_testing = true",
+                                      f"fort_synthetic_recipient_testing = {value}")
+                self.assertNotEqual(changed, raw)
+                with self.assertRaisesRegex(RuntimeError, "credential test switch is not exact"):
+                    verifier.validate_runtime_config(changed.encode(), RUNTIME)
+
+    def test_rejects_a_misspelled_or_extra_credential_switch_key(self):
+        raw = (RUNTIME / "pyscript-ci.toml").read_text()
+        for replacement in ("fort_synthetic_recipient_testng = true",
+                            "fort_synthetic_recipient_testing = true\nfort_synthetic_sender_testing = true"):
+            with self.subTest(replacement=replacement):
+                changed = raw.replace("fort_synthetic_recipient_testing = true", replacement)
+                self.assertNotEqual(changed, raw)
+                with self.assertRaisesRegex(RuntimeError, "unexpected top-level keys"):
+                    verifier.validate_runtime_config(changed.encode(), RUNTIME)
+
     def test_rejects_changed_worker_file_map(self):
         raw = (RUNTIME / "pyscript-ci.toml").read_text()
         changed = raw.replace(
