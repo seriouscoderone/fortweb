@@ -22,6 +22,8 @@ interface SettingsRecord {
 interface SettingsPageProps {
     vault: VaultRecord;
     settings: SettingsRecord;
+    /** What the browser says about keeping this wallet's storage. Absent inside the phone app and in fixtures. */
+    storageKept?: "kept" | "not-kept" | "unknown";
     onDeleteVault?(vaultId: string): Promise<void>;
     /** Makes this the vault that opens when the app starts. */
     onMakeDefault?(vaultId: string): Promise<void>;
@@ -29,6 +31,16 @@ interface SettingsPageProps {
 
 function enabledLabel(value: boolean): string {
     return value ? "Enabled" : "Disabled";
+}
+
+function keptLabel(value: NonNullable<SettingsPageProps["storageKept"]>): string {
+    if (value === "kept") {
+        return "Yes";
+    }
+    if (value === "not-kept") {
+        return "No. The browser may remove this wallet's storage when it runs short of space.";
+    }
+    return "This browser does not say.";
 }
 
 function detailItem(label: string, value: string): HTMLDivElement {
@@ -173,7 +185,7 @@ function startupCard(vault: VaultRecord, onMakeDefault: SettingsPageProps["onMak
     return card;
 }
 
-export function renderSettingsPage({ vault, settings, onDeleteVault, onMakeDefault }: SettingsPageProps) {
+export function renderSettingsPage({ vault, settings, storageKept, onDeleteVault, onMakeDefault }: SettingsPageProps) {
     return {
         title: "Settings",
         render(container: HTMLElement): void {
@@ -230,10 +242,11 @@ export function renderSettingsPage({ vault, settings, onDeleteVault, onMakeDefau
 
             const runtimeGrid = document.createElement("dl");
             runtimeGrid.className = "detail-grid";
-            runtimeGrid.append(
-                detailItem("Storage Backend", settings.storageBackend),
-                detailItem("Runtime Status", settings.runtimeStatus),
-            );
+            runtimeGrid.append(detailItem("Storage Backend", settings.storageBackend));
+            if (storageKept) {
+                runtimeGrid.append(detailItem("Kept by the Browser", keptLabel(storageKept)));
+            }
+            runtimeGrid.append(detailItem("Runtime Status", settings.runtimeStatus));
 
             runtimeCard.append(runtimeTitle, runtimeGrid);
             columns.append(startupCard(vault, onMakeDefault), defaultsCard, runtimeCard);

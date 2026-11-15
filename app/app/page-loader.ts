@@ -1,5 +1,7 @@
 import { type Route } from "./router.js";
 import { METHODS } from "../runtime/method-catalog.js";
+import { isNativeAvailable } from "../runtime/native-capabilities.js";
+import { storageKept, type StorageKept } from "../runtime/storage-keeping.js";
 import { postLog } from "../runtime/logger.js";
 
 type RecordValue = Record<string, unknown>;
@@ -27,6 +29,8 @@ export interface RouteDataResult {
     /** roles.list failed, not because the vault closed: the page says My roles could not be read. */
     rolesUnreadable?: boolean;
     settings?: RecordValue;
+    /** What the browser says about keeping the wallet's storage. Absent inside the phone app, which is no browser. */
+    storageKept?: StorageKept;
     watcherError?: string;
     watchers?: RecordValue[];
     witnessError?: string;
@@ -80,9 +84,10 @@ export async function loadRouteData({ bridge, route }: RouteDataLoaderContext): 
     }
 
     if (route.name === "settings") {
-        return bridge.request<{ settings: RecordValue }>(METHODS.settingsGet, {
+        const loaded = await bridge.request<{ settings: RecordValue }>(METHODS.settingsGet, {
             vaultId: route.params.vaultId,
         });
+        return isNativeAvailable() ? loaded : { ...loaded, storageKept: await storageKept() };
     }
 
     if (route.name === "kf-identifiers") {

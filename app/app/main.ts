@@ -29,6 +29,7 @@ import { renderSetupPage } from "../features/vaults/setup-page.js";
 import { installGlobalHandlers } from "../runtime/global-handlers.js";
 import { fingerprintState } from "../runtime/vault-fingerprint.js";
 import { METHODS } from "../runtime/method-catalog.js";
+import { askToKeepStorage } from "../runtime/storage-keeping.js";
 import {
     readErrorMessage,
     type KeptRead,
@@ -376,6 +377,9 @@ actions = {
 
     async openVault(vaultId: string, passcode = ""): Promise<Record<string, unknown>> {
         const { vault } = await bridge.request<{ vault: Record<string, unknown> }>(METHODS.vaultsOpen, { vaultId, passcode });
+        // A browser that has just met the wallet says no; it may say yes once the wallet has been used. So the
+        // wallet asks at every opening, and does not wait for the answer.
+        void askToKeepStorage();
         session.patch({
             unlockedVaultId: vaultId,
             vaultSummary: assumeType<VaultSummary>(vault),

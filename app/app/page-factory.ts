@@ -210,6 +210,7 @@ export async function loadPage({
             page: renderSettingsPage({
                 vault: assumeType<SettingsPageProps["vault"]>(findVault(route.params.vaultId)),
                 settings: assumeType<SettingsPageProps["settings"]>(pageData.settings),
+                storageKept: assumeType<SettingsPageProps["storageKept"]>(pageData.storageKept),
                 onMakeDefault: (vaultId: string) => actions.setDefaultVault(vaultId),
             }),
             vault: findVault(route.params.vaultId),
