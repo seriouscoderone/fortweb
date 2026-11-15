@@ -6,6 +6,7 @@ import io
 import importlib.util
 import os
 import socket
+import sys
 import tempfile
 import threading
 import unittest
@@ -199,6 +200,43 @@ class ServerTest(unittest.TestCase):
                        "/app/index.html/", "/pyscript-ci.toml/"):
             with self.subTest(target=target):
                 self.assertEqual(self.get(target)[0].status, 404)
+
+    def reported(self, request):
+        """What the server writes to standard error while it deals with one connection, once it is done with it."""
+        done = threading.Event()
+        shutdown_request = self.server.shutdown_request
+
+        def finished(connection):
+            shutdown_request(connection)
+            done.set()
+
+        self.server.shutdown_request = finished
+        report = io.StringIO()
+        with mock.patch.object(sys, "stderr", report):
+            request()
+            self.assertTrue(done.wait(10), "the server did not finish with the connection")
+        return report.getvalue()
+
+    def test_a_connection_the_browser_dropped_reports_nothing(self):
+        (self.root / "app" / "big.js").write_bytes(b"x" * (16 * 1024 * 1024))  # more than the sockets can hold
+
+        def drop():
+            with socket.create_connection(("127.0.0.1", self.port), timeout=10) as connection:
+                connection.sendall(f"GET /app/big.js HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n".encode())
+                connection.recv(1)  # the answer has begun; closing with most of it unread resets the connection
+
+        self.assertEqual(self.reported(drop), "")
+
+    def test_a_file_that_cannot_be_read_after_it_was_found_is_not_found(self):
+        answers = []
+        with mock.patch.object(start_wallet, "resolve", return_value=self.root / "app" / "gone.js"):
+            report = self.reported(lambda: answers.append(self.get("/app/gone.js")[0].status))
+        self.assertEqual((answers, report), ([404], ""))
+
+    def test_any_other_error_keeps_the_ordinary_report(self):
+        with mock.patch.object(start_wallet, "resolve", side_effect=ZeroDivisionError("a real fault")):
+            report = self.reported(lambda: self.assertRaises(http.client.RemoteDisconnected, self.get, "/app/main.js"))
+        self.assertIn("ZeroDivisionError: a real fault", report)
 
     def test_other_methods_are_refused(self):
         response, _ = self.get("/app/index.html", method="POST")

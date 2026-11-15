@@ -91,7 +91,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if found is None:
                 self._refuse(404, "Not found.", with_body)
             else:
-                self._send(200, found.read_bytes(), TYPES.get(found.suffix.lower())
+                try:
+                    body = found.read_bytes()
+                except OSError:  # removed, or made unreadable, since it was found
+                    self._refuse(404, "Not found.", with_body)
+                    return
+                self._send(200, body, TYPES.get(found.suffix.lower())
                            or mimetypes.guess_type(found.name)[0] or "application/octet-stream", with_body)
 
     def _send(self, status: int, body: bytes, content_type: str, with_body: bool = True) -> None:
@@ -135,6 +140,12 @@ class Server(http.server.ThreadingHTTPServer):
     def __init__(self, root: Path, port: int):
         self.wallet_root = root.resolve()
         super().__init__((HOST, port), Handler)
+
+    def handle_error(self, request, client_address) -> None:
+        # A browser that drops a connection is no fault, and the window the person leaves open stays quiet.
+        # Any other error keeps Python's ordinary report, so a real fault stays visible.
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
 
     def server_bind(self) -> None:
         # HTTPServer's own server_bind looks this computer's name up, which can take seconds on macOS and which
