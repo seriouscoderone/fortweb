@@ -36,6 +36,28 @@ async function browserThatWillNotSay(page: Page): Promise<void> {
     });
 }
 
+/** From the moment `throwOnLookUp(page)` is called, merely looking up `navigator.storage` throws. */
+async function browserWhoseStorageLookUpCanThrow(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+        const real = Object.getOwnPropertyDescriptor(Navigator.prototype, 'storage');
+        Object.defineProperty(Navigator.prototype, 'storage', {
+            configurable: true,
+            get(this: Navigator) {
+                if ((window as unknown as { storageLookUpThrows?: boolean }).storageLookUpThrows) {
+                    throw new TypeError('The browser would not give its storage manager.');
+                }
+                return real?.get?.call(this);
+            },
+        });
+    });
+}
+
+async function throwOnLookUp(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        (window as unknown as { storageLookUpThrows?: boolean }).storageLookUpThrows = true;
+    });
+}
+
 /** Stands in for the phone app: its bridge is there, and offers nothing. */
 async function insideThePhoneApp(page: Page): Promise<void> {
     await page.addInitScript(() => {
@@ -114,6 +136,14 @@ test.describe('Keeping the wallet\'s storage', () => {
         await openSettings(page);
         await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
         expect((await asked(page)).asked).toBe(1);
+    });
+
+    test('Settings says the browser does not say when looking up its storage throws', async ({ page }) => {
+        await browserWhoseStorageLookUpCanThrow(page);
+        await setUpWallet(page);
+        await throwOnLookUp(page);
+        await openSettings(page);
+        await expect(keptByTheBrowser(page)).toHaveText('This browser does not say.');
     });
 
     test('a failed ask leaves the vault to open, with no error on the page', async ({ page }) => {

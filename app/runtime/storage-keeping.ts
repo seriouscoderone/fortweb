@@ -16,11 +16,12 @@ function storageManager(): StorageManager | null {
 }
 
 async function answer(ask: (storage: StorageManager) => Promise<boolean>): Promise<StorageKept> {
-    const storage = storageManager();
-    if (!storage) {
-        return "unknown";
-    }
     try {
+        // Inside the try: a browser whose look-up throws does not say either.
+        const storage = storageManager();
+        if (!storage) {
+            return "unknown";
+        }
         return (await ask(storage)) ? "kept" : "not-kept";
     } catch {
         return "unknown";
