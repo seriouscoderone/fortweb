@@ -143,6 +143,8 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
         self.assertEqual(response.getheader("Cross-Origin-Opener-Policy"), "same-origin")
         self.assertEqual(response.getheader("Cross-Origin-Embedder-Policy"), "require-corp")
+        # Without it any page open in the same browser could load the wallet's files as scripts or images.
+        self.assertEqual(response.getheader("Cross-Origin-Resource-Policy"), "same-origin")
 
     def raw(self, request):
         """Everything the server sends for one request, read from the socket as it comes."""

@@ -100,9 +100,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        # As the phone's shell and the wallet's development server send them.
+        # The three the phone's shell sends with the wallet's own files (the development server sends the first
+        # two). The third matters most here, where other pages share the browser: no other site can load the
+        # wallet's files as scripts or images.
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.end_headers()
         if with_body:
             self.wfile.write(body)
