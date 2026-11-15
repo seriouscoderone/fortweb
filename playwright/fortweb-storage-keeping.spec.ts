@@ -76,11 +76,16 @@ test.describe('Keeping the wallet\'s storage', () => {
         expect((await asked(page)).asked).toBe(1);
     });
 
-    test('a browser that said no is asked again when the vault is next opened, and Settings follows its answer', async ({ page }) => {
+    test('a browser that said no is asked again when the vault is next opened, not by a refused passcode, and Settings follows its answer', async ({ page }) => {
         await browserThatSays(page, false, true);
         await setUpWallet(page);
         await expect.poll(async () => (await asked(page)).asked).toBe(1);
         await page.getByRole('button', { name: 'Lock vault' }).click();
+        await expect(page.getByRole('heading', { name: 'Open My Wallet' })).toBeVisible({ timeout: 60_000 });
+        await page.getByLabel('Passcode').fill('not-the-passcode');
+        await page.getByRole('button', { name: 'Open', exact: true }).click();
+        await expect(page.locator('#unlock-status')).toHaveClass(/status-line--error/, { timeout: 60_000 });
+        expect((await asked(page)).asked).toBe(1);
         await unlock(page);
         await expect.poll(async () => (await asked(page)).asked).toBe(2);
         await openSettings(page);
