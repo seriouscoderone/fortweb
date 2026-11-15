@@ -14,6 +14,7 @@ import argparse
 import errno
 import http.server
 import mimetypes
+import socketserver
 import sys
 import webbrowser
 from pathlib import Path, PurePosixPath
@@ -128,6 +129,12 @@ class Server(http.server.ThreadingHTTPServer):
     def __init__(self, root: Path, port: int):
         self.wallet_root = root.resolve()
         super().__init__((HOST, port), Handler)
+
+    def server_bind(self) -> None:
+        # HTTPServer's own server_bind looks this computer's name up, which can take seconds on macOS and which
+        # nothing here uses: the server's name is its address.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = HOST, self.server_address[1]
 
 
 def missing(root: Path) -> list[str]:

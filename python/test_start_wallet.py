@@ -179,6 +179,26 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
 
+class NameLookupTest(unittest.TestCase):
+    def test_making_the_server_looks_no_name_up(self):
+        # On macOS a look-up of this computer's own name can take seconds, before the script says where it is.
+        with tempfile.TemporaryDirectory() as folder:
+            root = package(Path(folder).resolve() / "wallet")
+            with mock.patch.object(socket, "getfqdn", side_effect=AssertionError("looked a name up")) as lookup:
+                server = start_wallet.Server(root, 0)
+            self.addCleanup(server.server_close)
+            lookup.assert_not_called()
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(thread.join)
+            self.addCleanup(server.shutdown)
+            port = server.server_address[1]
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            self.addCleanup(connection.close)
+            connection.request("GET", "/app/main.js")
+            response = connection.getresponse()
+            self.assertEqual((response.status, response.read()), (200, b"export {};"))
+
 class MainTest(unittest.TestCase):
     def run_main(self, *argv):
         """main's exit code, and what it wrote to standard output and standard error."""
