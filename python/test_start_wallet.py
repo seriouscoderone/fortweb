@@ -1,5 +1,7 @@
 """The script that serves the wallet to a browser on a computer (scripts/start_wallet.py)."""
+import contextlib
 import http.client
+import io
 import importlib.util
 import os
 import socket
@@ -177,9 +179,20 @@ class ServerTest(unittest.TestCase):
 
 
 class MainTest(unittest.TestCase):
+    def run_main(self, *argv):
+        """main's exit code, and what it wrote to standard output and standard error."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = start_wallet.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
     def test_a_folder_that_is_not_a_package_is_refused(self):
         with tempfile.TemporaryDirectory() as folder:
-            self.assertEqual(start_wallet.main(["--root", folder, "--no-browser"]), 2)
+            (Path(folder) / "app").mkdir()
+            code, out, err = self.run_main("--root", folder, "--no-browser")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("not a wallet package", err)
+        self.assertIn("it has no vendor, wheels, pyscript-ci.toml, runtime-closure.json.", err)
 
     def use_port(self, port):
         """Has the script use this port for the length of the test."""
@@ -197,7 +210,11 @@ class MainTest(unittest.TestCase):
             root = package(Path(folder).resolve() / "wallet")
             with mock.patch.object(start_wallet.Server, "serve_forever",
                                    side_effect=AssertionError("the script served on a taken port")):
-                self.assertEqual(start_wallet.main(["--root", str(root), "--no-browser"]), 1)
+                code, out, err = self.run_main("--root", str(root), "--no-browser")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("does not pick another port", err)
+        self.assertIn(f"do not open http://127.0.0.1:{start_wallet.PORT}/: whatever holds the port would be "
+                      "answering there.", err)
 
 if __name__ == "__main__":
     unittest.main()
