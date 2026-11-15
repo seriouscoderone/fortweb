@@ -1626,10 +1626,11 @@ class RequestLockTest(unittest.IsolatedAsyncioTestCase):
         roling, _ = _load_roling()
         worker = WorkerRequests(self, roling, Vaults().vaulting).worker
         self.assertEqual(worker._UNLOCKED_METHODS, frozenset({"sources.read"}))
-        reached = []
+        reached, held = [], {}
 
         async def dispatch(method, params):
             reached.append(method)
+            held[method] = set(worker.js.navigator.locks.held)
             return {}
         worker._dispatch = dispatch
         methods = ("sources.read", "roles.list", "roles.takeOn", "roles.remove")
@@ -1642,6 +1643,8 @@ class RequestLockTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reached, ["sources.read"])
         await asyncio.gather(*answers)
         self.assertEqual(sorted(reached), sorted(methods))
+        # An unlocked read reaches no storage: it does not take the writer lock, which every other request holds.
+        self.assertEqual(held, {"sources.read": set(), **{method: {"@fortweb-v2/writer"} for method in methods[1:]}})
 
 
 class LastReadAcrossVaultsTest(unittest.IsolatedAsyncioTestCase):
