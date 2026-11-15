@@ -78,18 +78,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         own = f"{HOST}:{port}"
         host = self.headers.get("Host", "")
         if not self.path.startswith("/"):
-            self._refuse(400, "Bad request.")
+            self._refuse(400, "Bad request.", with_body)
         elif host == f"localhost:{port}":
             # One address, one wallet: localhost would be a second, empty one.
             self._send_on(f"http://{own}{self.path}")
         elif host != own:
-            self._refuse(421, f"This wallet answers only at http://{own}/.")
+            self._refuse(421, f"This wallet answers only at http://{own}/.", with_body)
         elif urlsplit(self.path).path == "/":
             self._send_on(f"http://{own}/{START_PAGE}")
         else:
             found = resolve(self.server.wallet_root, self.path)
             if found is None:
-                self._refuse(404, "Not found.")
+                self._refuse(404, "Not found.", with_body)
             else:
                 self._send(200, found.read_bytes(), TYPES.get(found.suffix.lower())
                            or mimetypes.guess_type(found.name)[0] or "application/octet-stream", with_body)
@@ -107,8 +107,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if with_body:
             self.wfile.write(body)
 
-    def _refuse(self, status: int, message: str) -> None:
-        self._send(status, (message + "\n").encode(), "text/plain; charset=utf-8")
+    def _refuse(self, status: int, message: str, with_body: bool) -> None:
+        self._send(status, (message + "\n").encode(), "text/plain; charset=utf-8", with_body)
 
     def _send_on(self, location: str) -> None:
         self.send_response(307)

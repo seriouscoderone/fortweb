@@ -144,6 +144,33 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(response.getheader("Cross-Origin-Opener-Policy"), "same-origin")
         self.assertEqual(response.getheader("Cross-Origin-Embedder-Policy"), "require-corp")
 
+    def raw(self, request):
+        """Everything the server sends for one request, read from the socket as it comes."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as connection:
+            connection.sendall(request.encode())
+            received = b""
+            while True:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    return received
+                received += chunk
+
+    def test_a_refused_head_sends_no_body(self):
+        own = f"127.0.0.1:{self.port}"
+        for target, host, status in (("/nothing", own, 404), ("/app/index.html", "wallet.example.test", 421),
+                                     ("*", own, 400)):
+            with self.subTest(status=status):
+                answers = {}
+                for method in ("GET", "HEAD"):
+                    sent = self.raw(f"{method} {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+                    lines, _, body = sent.partition(b"\r\n\r\n")
+                    lines = lines.decode().split("\r\n")
+                    self.assertTrue(lines[0].startswith(f"HTTP/1.0 {status} "), lines[0])
+                    answers[method] = dict(line.split(": ", 1) for line in lines[1:]), body
+                self.assertEqual(answers["HEAD"][1], b"")
+                self.assertNotEqual(answers["GET"][1], b"")
+                self.assertEqual(answers["HEAD"][0]["Content-Length"], str(len(answers["GET"][1])))
+
     def test_head_sends_no_body(self):
         response, body = self.get("/app/main.js", method="HEAD")
         self.assertEqual((response.status, body, response.getheader("Content-Length")), (200, b"", "10"))
