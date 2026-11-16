@@ -5,7 +5,7 @@ import { finishRequest, setUpWallet, startRequest } from './fixtures/roles';
 const NO_SUCH_EXCHANGE = `E${'A'.repeat(43)}`;
 
 test.describe('The credential engine in this build', () => {
-    test('is switched on: an exchange that does not exist is not found, where a build without the switch says unsupported',
+    test('is switched on: an exchange that does not exist is not found, where a build without the switch says unsupported; a caller that leaves out syntheticOnly is still refused',
         async ({ page }) => {
             await setUpWallet(page);
             // Only one runtime at a time may hold the wallet's storage, so the page's own gives the vault up first.
