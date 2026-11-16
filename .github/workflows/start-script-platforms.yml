@@ -1,8 +1,8 @@
 name: Start Script on Windows, macOS and Linux
 
 # The start script (scripts/start_wallet.py) runs on a person's own computer, with nothing installed but
-# Python 3: its unit tests run on each of the three systems, from the oldest Python it supports (3.9, which
-# macOS ships) to the newest.
+# Python 3: its unit tests run on each of the three systems with Python 3.11, 3.13 and 3.14 (the newest), and
+# on Windows and macOS also with 3.9, the oldest it supports, which macOS ships.
 on:
   push:
     branches:
@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.9', '3.11', '3.13']
+        python: ['3.9', '3.11', '3.13', '3.14']
         exclude:
           # setup-python has no 3.9 for the Ubuntu that ubuntu-latest gives; 3.9 matters on macOS, which ships it.
           - os: ubuntu-latest
